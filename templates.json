@@ -1,0 +1,21 @@
+{
+  "末日庇护所-天蝎座隧道": {
+    "name": "末日庇护所-天蝎座隧道",
+    "positive_prompt": "Cinematic shot of a barren rocky wilderness cliff face under an overcast dark apocalyptic sky with muted gray-brown tones, dead twisted shrubs and dry branches framing both sides of the composition creating a natural border, camera holds still for a moment on the seemingly ordinary rock surface then the rock facade begins to crack and split apart with grinding force revealing a massive hidden reinforced steel blast door with heavy rivets behind the natural camouflage, the armored door slowly slides open with visible hydraulic mechanism, camera begins pushing forward into the dark tunnel beyond the threshold, inside a long deep corridor stretches into pitch darkness as red motion-sensor LED strip lights ignite one by one sequentially along the ceiling creating a powerful vanishing point perspective drawing the eye deep into the unknown, surveillance cameras with menacing glowing red indicator LEDs mounted on both concrete and steel-reinforced walls tracking movement, biometric scanner panels with pulsing red authentication light embedded in the corridor walls, Scorpio zodiac symbol hidden within the geometric rivet pattern arrangement on the steel blast door, atmosphere of extreme secrecy danger and paranoia, deep shadows with dominant deep crimson red and matte black color palette, volumetric fog wisps and dust particles drifting in the tunnel lit by red glow, camera accelerates as it penetrates deeper into the corridor, hyper-realistic CG render style, fine film grain texture, dark vignette, 2.39:1 cinematic widescreen aspect ratio with black letterbox bars, ominous mysterious and threatening mood, 8K ultra high detail quality, cinematic lighting",
+    "negative_prompt": "bright daylight, sunny sky, green lush vegetation, people clearly visible, friendly welcoming atmosphere, warm cozy lighting, colorful cheerful scene, open visible entrance, cartoon style, anime style, fantasy magic elements, text overlay, watermark, logo, UI elements, deformed structures, floating objects, low quality, blurry, pixelated, overexposed, oversaturated, white bright interior, clean modern architecture, smooth plastic look, illustration style, painting style, flat lighting",
+    "tags": [
+      "末日",
+      "庇护所",
+      "暗黑",
+      "隧道",
+      "机关",
+      "电影感",
+      "CG渲染"
+    ],
+    "description": "末日废土风格的隐秘庇护所入口+隧道，暗红色调，电影级CG渲染，效果极佳",
+    "source_topic": "4个星座的末日庇护所",
+    "source_segment": 4,
+    "created_at": "2026-02-24 17:56:45",
+    "quality_score": 9.5
+  }
+}
