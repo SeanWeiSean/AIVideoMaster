@@ -13,6 +13,11 @@ env/
 # Output files (generated videos, discussion logs, prompts)
 output/
 
+# Node / Electron
+ui/node_modules/
+ui/dist/
+ui/out/
+
 # IDE
 .vscode/
 .idea/

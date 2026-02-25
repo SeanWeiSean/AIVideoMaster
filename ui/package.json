@@ -1,0 +1,13 @@
+{
+  "name": "aivideomaster",
+  "version": "1.0.0",
+  "description": "AI Video Pipeline - 多 Agent 协作视频生成管线",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "dependencies": {
+    "electron": "^28.0.0"
+  }
+}

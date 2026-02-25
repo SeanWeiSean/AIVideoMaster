@@ -1,0 +1,320 @@
+{
+  "1": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "2": {
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "3": {
+    "inputs": {
+      "unet_name": "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "4": {
+    "inputs": {
+      "unet_name": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "5": {
+    "inputs": {
+      "lora_name": "DetailEnhancerV1.safetensors",
+      "strength_model": 1.0000000000000002
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "6": {
+    "inputs": {
+      "lora_name": "DetailEnhancerV1.safetensors",
+      "strength_model": 1.0000000000000002
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "7": {
+    "inputs": {
+      "shift": 5.000000000000001,
+      "model": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "采样算法（SD3）"
+    }
+  },
+  "8": {
+    "inputs": {
+      "shift": 5.000000000000001,
+      "model": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "采样算法（SD3）"
+    }
+  },
+  "9": {
+    "inputs": {
+      "text": "A snowy winter night outside the entrance of a luxurious mansion. The camera begins just outside the open doorway, showing cold blue snow falling in slow motion. Warm golden light spills softly from inside. The camera moves forward very slowly, crossing the doorway into the cozy interior. As the camera enters, subtle reflections appear on nearby glass and window surfaces — the snowy exterior behind, and the warm lights inside. A fireplace glows gently, warm furniture and soft textures fill the room. The movement is minimal, smooth, and cinematic, ending just a few steps inside the room.",
+      "clip": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "10": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": 652255886438896,
+      "steps": 10,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": 5,
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "8",
+        0
+      ],
+      "positive": [
+        "9",
+        0
+      ],
+      "negative": [
+        "13",
+        0
+      ],
+      "latent_image": [
+        "14",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "K采样器（高级）"
+    }
+  },
+  "11": {
+    "inputs": {
+      "fps": 16,
+      "images": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "12": {
+    "inputs": {
+      "samples": [
+        "17",
+        0
+      ],
+      "vae": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "13": {
+    "inputs": {
+      "text": "low quality, low detail, blurry, fast motion, shaky camera, unstable movement, distorted perspective, warped reflections, incorrect glass behavior, flickering lights, harsh shadows, overexposed, underexposed, grainy, noisy, dirty lens artifacts, jpeg artifacts, glitch, motion smear, unnatural color shifts, cartoonish, exaggerated contrast, unrealistic lighting, incorrect physics, inconsistent shadows, broken geometry, duplicated objects, stretched textures, deformed furniture, chaotic composition, cluttered scene, messy objects, watermark, text, subtitles, logos, AI artifacts, unnatural snow behavior.",
+      "clip": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "14": {
+    "inputs": {
+      "width": 640,
+      "height": 640,
+      "length": 81,
+      "batch_size": 1
+    },
+    "class_type": "EmptyHunyuanLatentVideo",
+    "_meta": {
+      "title": "空Latent视频（Hunyuan）"
+    }
+  },
+  "16": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "17": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": 0,
+      "steps": 10,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 5,
+      "end_at_step": 10,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "7",
+        0
+      ],
+      "positive": [
+        "9",
+        0
+      ],
+      "negative": [
+        "13",
+        0
+      ],
+      "latent_image": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "K采样器（高级）"
+    }
+  },
+  "18": {
+    "inputs": {
+      "lora_name": "Wan21_AccVid_T2V_14B_lora_rank32_fp16.safetensors",
+      "strength_model": 1.0000000000000002,
+      "model": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "19": {
+    "inputs": {
+      "lora_name": "Wan21_CausVid_14B_T2V_lora_rank32_v2.safetensors",
+      "strength_model": 1.0000000000000002,
+      "model": [
+        "18",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "21": {
+    "inputs": {
+      "lora_name": "Wan21_T2V_14B_MoviiGen_lora_rank32_fp16.safetensors",
+      "strength_model": 1.0000000000000002,
+      "model": [
+        "19",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "22": {
+    "inputs": {
+      "lora_name": "Wan21_AccVid_T2V_14B_lora_rank32_fp16.safetensors",
+      "strength_model": 1.0000000000000002,
+      "model": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "23": {
+    "inputs": {
+      "lora_name": "Wan21_T2V_14B_MoviiGen_lora_rank32_fp16.safetensors",
+      "strength_model": 1.0000000000000002,
+      "model": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "24": {
+    "inputs": {
+      "lora_name": "Wan21_CausVid_14B_T2V_lora_rank32_v2.safetensors",
+      "strength_model": 1.0000000000000002,
+      "model": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  }
+}

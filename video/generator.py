@@ -40,6 +40,15 @@ _WORKFLOW_PROFILES: dict[str, dict] = {
         "seed_nodes": ("6",),
         "output_nodes": ("14",),
     },
+    "cocktail_lora": {
+        # Wan2.2 14B 鸡尾酒 LoRA 工作流（10步）
+        "file": "wan2.2/wan22_cocktail_lora.json",
+        "positive_prompt_nodes": ("9",),
+        "negative_prompt_nodes": ("13",),
+        "latent_nodes": ("14",),
+        "seed_nodes": ("10", "17"),
+        "output_nodes": ("16",),
+    },
 }
 
 
@@ -127,7 +136,12 @@ class VideoGenerator:
             print(f"⚠️ 未知 quality_mode '{mode}'，回退到 fast")
             mode = "fast"
         profile = _WORKFLOW_PROFILES[mode]
-        label = "⚡ 快速模式 (Lora 4步)" if mode == "fast" else "🎨 高质量模式 (标准 20步)"
+        labels = {
+            "fast": "⚡ 快速模式 (Lora 4步)",
+            "quality": "🎨 高质量模式 (标准 20步)",
+            "cocktail_lora": "🍸 鸡尾酒LoRA模式 (10步)",
+        }
+        label = labels.get(mode, mode)
         print(f"🎬 {label}")
         return profile
 

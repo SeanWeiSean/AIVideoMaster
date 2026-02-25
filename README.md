@@ -1,381 +1,275 @@
-# Video Pipeline — 多 Agent 协作视频生成管线
+# AI Video Master（Video Pipeline）
 
-## 项目概述
+多 Agent 协作的视频生成项目，支持两条主流程：
 
-本项目是一个**端到端的 AI 视频生成管线**，通过 3 个 AI Agent（文案师、镜头师、裁判）多轮协作讨论，自动生成高质量的视频创作方案，然后调用本地 ComfyUI + Wan2.2 工作流逐段生成 5 秒视频片段，最终用 ffmpeg 合成完整视频。
+- **主题创作模式（T2V）**：输入一个主题，自动讨论并生成视频片段
+- **小说改编模式（I2V）**：输入小说文字，按场景拆分并产出参考图/视频动作 Prompt
 
-**核心流程：用户给一个主题 → Agent 讨论出分镜方案 → 自动生成视频 → 用户审核 → 合成成片。**
+项目同时提供：
 
----
-
-## 技术栈
-
-| 组件 | 技术 |
-|------|------|
-| LLM 通信 | OpenAI SDK（兼容任意 OpenAI API 格式的 LLM） |
-| 视频生成 | ComfyUI + Wan2.2 14B（本地部署） |
-| 视频合成 | ffmpeg |
-| 语言 | Python 3.10+ |
-| 依赖 | `openai>=1.0.0`（唯一 pip 依赖） |
+- **CLI 模式**（`main.py`）
+- **桌面 UI 模式**（Electron + Python API Server）
 
 ---
 
-## 目录结构
+## 1. 当前能力概览
 
-```
+### 1.1 主题创作（T2V）
+
+流程：文案师 → 镜头师 → 裁判（最多 3 轮）→ 裁判产出最终 Enriched Prompts → ComfyUI 生成视频 → 审核 → ffmpeg 合成。
+
+### 1.2 小说改编（I2V）
+
+流程：场景分析师 → 小说镜头师 → 裁判（最多 3 轮）→ 裁判产出最终 Prompt 集合：
+
+- `image_prompt`（参考图生成）
+- `video_prompt`（I2V 动作描述）
+- `negative_prompt`
+- `narration`（旁白保留接口）
+
+> 当前已接入参考图 API 抽象层（`video/image_generator.py`），你可以按自己的 Qwen-Image 接口格式改造。I2V 自动化步骤留了接口位，便于你后续接入自己的 ComfyUI I2V 工作流。
+
+### 1.3 优秀模板存储
+
+支持将效果好的 Prompt 存为模板（`templates.py` + `templates.json`），可在 UI 里管理。
+
+---
+
+## 2. 目录结构（与当前代码一致）
+
+```text
 videopipeline/
-├── main.py                  # 主入口，串联完整 5 阶段流程
-├── config.py                # 全局配置（LLM、视频参数、管线参数）
-├── requirements.txt         # pip 依赖（仅 openai）
-├── agents/                  # AI Agent 模块
-│   ├── base.py              # BaseAgent 基类（封装 LLM 调用）
-│   ├── copywriter.py        # 文案师 Agent
-│   ├── cinematographer.py   # 镜头师 Agent
-│   ├── judge.py             # 裁判 Agent（评审 + enriched prompt 生成）
-│   └── discussion.py        # DiscussionOrchestrator 多轮讨论协调器
-├── video/                   # 视频生成与合成模块
-│   ├── generator.py         # VideoGenerator（ComfyUI 客户端 + 工作流注入）
-│   └── composer.py          # VideoComposer（ffmpeg 合成 + 交互审核）
-├── workflows/               # ComfyUI 工作流 JSON 文件
-│   ├── wan22_lora4.json     # 快速模式工作流（Lora 4步，~60s/片段）
-│   └── wan22_full.json      # 高质量模式工作流（标准 20步，~10min/片段）
-└── output/                  # 输出目录（讨论记录、prompt JSON、视频片段、成片）
+├─ main.py                         # CLI 主入口（topic + novel）
+├─ server.py                       # Python HTTP API（给 Electron UI 用）
+├─ config.py                       # 配置 dataclass
+├─ templates.py                    # 模板存储逻辑
+├─ templates.json                  # 模板数据
+├─ requirements.txt                # Python 依赖
+│
+├─ agents/
+│  ├─ base.py
+│  ├─ copywriter.py
+│  ├─ cinematographer.py
+│  ├─ judge.py
+│  ├─ discussion.py                # 主题模式 orchestrator
+│  ├─ scene_analyzer.py            # 小说模式：场景分析师
+│  ├─ novel_cinematographer.py     # 小说模式：镜头师
+│  └─ novel_discussion.py          # 小说模式 orchestrator + NovelJudge
+│
+├─ video/
+│  ├─ generator.py                 # ComfyUI 视频生成（T2V）
+│  ├─ composer.py                  # ffmpeg 合成
+│  └─ image_generator.py           # 参考图生成抽象（Qwen-Image/ComfyUI）
+│
+├─ workflows/
+│  └─ wan2.2/
+│     ├─ wan22_full.json
+│     ├─ wan22_lora4.json
+│     ├─ wan22_cocktail_lora.json
+│     └─ wan22_14B_t2v.json
+│
+├─ ui/
+│  ├─ package.json
+│  ├─ main.js                      # Electron 主进程（自动启动 server.py）
+│  ├─ preload.js
+│  └─ renderer/
+│     ├─ index.html
+│     ├─ app.js
+│     └─ styles.css
+│
+└─ output/                         # 讨论记录、prompts JSON、视频片段、最终视频
 ```
 
 ---
 
-## 架构
+## 3. 工作流模式清单
 
-```
-┌─────────────────────────────────────────────────┐
-│              Discussion Orchestrator             │
-│                                                  │
-│  ┌──────────┐  ┌──────────────┐  ┌──────────┐  │
-│  │ 📝 文案师 │→│ 🎬 镜头师    │→│ ⚖️ 裁判   │  │
-│  │Copywriter│  │Cinematograph.│  │  Judge    │  │
-│  └──────────┘  └──────────────┘  └──────────┘  │
-│       ↑              ↑                │         │
-│       └──────────────┴────────────────┘         │
-│                  (最多 3 轮)                      │
-└─────────────────┬───────────────────────────────┘
-                  │ 最终 Enriched Prompts (positive + negative)
-                  ▼
-         ┌────────────────┐
-         │ Video Generator │ → ComfyUI + Wan2.2
-         └────────┬───────┘
-                  │ 5秒视频片段 (.mp4)
-                  ▼
-         ┌────────────────┐
-         │  用户审核选择    │ → y/n/r (使用/跳过/重新生成)
-         └────────┬───────┘
-                  │ 选定片段
-                  ▼
-         ┌────────────────┐
-         │ Video Composer  │ → ffmpeg 合成
-         └────────────────┘
+`VideoConfig.quality_mode` 当前支持：
+
+- `fast`：Wan2.2 Lora4 快速模式
+- `quality`：Wan2.2 标准高质量模式
+- `cocktail_lora`：鸡尾酒 LoRA 工作流（`wan22_cocktail_lora.json`）
+
+CLI 对应参数：
+
+```bash
+python main.py --quality fast
+python main.py --quality quality
+python main.py --quality cocktail_lora
 ```
 
 ---
 
-## 完整流程（5 个 Phase）
+## 4. 配置说明
 
-### Phase 1：多 Agent 讨论（自动）
+### 4.1 环境变量
 
-三个 Agent 按固定顺序发言，最多进行 3 轮，直到裁判通过：
-
-```
-文案师 → 镜头师 → 裁判 → (若未通过) → 文案师 → 镜头师 → 裁判 → ...
-```
-
-- **文案师 (`CopywriterAgent`)**：根据主题撰写分段文案（每段 5 秒），输出"总体构思 + 分段文案（文案内容 + 画面描述）"
-- **镜头师 (`CinematographerAgent`)**：为每段设计镜头语言，输出"视觉风格定义 + 分镜设计（镜头类型、构图、运动方式、英文 video prompt）"
-- **裁判 (`JudgeAgent`)**：评审方案质量，**最高优先级是风格一致性**，输出"评分 + 评审意见 + 一致性检查表"，判定通过或返修
-
-裁判通过后，还会额外调用一次 LLM，综合全部讨论生成 **enriched prompts**——为每个片段输出最终的 `positive_prompt`（英文，详细到可直接生成）和 `negative_prompt`（英文，按片段定制）。
-
-### Phase 2：用户确认
-
-展示所有片段的 enriched prompt，用户输入 `y` 确认后开始生成。
-
-### Phase 3：视频生成
-
-`VideoGenerator` 依次将每个片段的 prompt 注入 ComfyUI 工作流并提交：
-1. 加载工作流模板 JSON
-2. 动态注入：正向 prompt、反向 prompt、分辨率、帧数、种子
-3. 提交到 ComfyUI API (`POST /prompt`)
-4. 轮询 `/queue` 和 `/history/{prompt_id}` 等待完成
-5. 从 ComfyUI 下载生成的 MP4 文件
-
-### Phase 4：用户审核
-
-逐个展示生成的视频片段，用户可选择：
-- `y` — 使用该片段
-- `n` — 跳过
-- `r` — 标记重新生成
-
-### Phase 5：视频合成
-
-使用 ffmpeg 将选定的片段按序号拼接成最终视频。优先用 `concat` 协议（快速无损），失败则回退到 `filter_complex` 重编码模式。
-
----
-
-## 配置详解
-
-### `config.py` 数据结构
-
-```python
-@dataclass
-class LLMConfig:
-    api_key: str        # LLM API Key（环境变量 LLM_API_KEY）
-    base_url: str       # LLM API 地址（环境变量 LLM_BASE_URL，默认 http://localhost:23333/api/openai/v1）
-    model: str          # 模型名称（环境变量 LLM_MODEL，默认 claude-opus-4.6）
-    temperature: float  # 0.7
-    max_tokens: int     # 8192
-
-@dataclass
-class VideoConfig:
-    comfyui_url: str       # ComfyUI API 地址（默认 http://localhost:8189）
-    workflow_path: str     # 自定义工作流路径（留空用内置）
-    quality_mode: str      # "fast"（Lora 4步 ~60s）或 "quality"（标准 20步 ~10min）
-    width: int             # 640
-    height: int            # 640
-    length: int            # 81（帧数，81帧 ≈ 5秒 @16fps）
-    fps: int               # 16
-    negative_prompt: str   # 全局默认反向提示词
-    poll_interval: int     # 轮询间隔 15s
-    generation_timeout: int # 单片段超时 1800s（30min）
-    output_dir: str        # 输出目录 ./output
-
-@dataclass
-class PipelineConfig:
-    llm: LLMConfig
-    video: VideoConfig
-    max_discussion_rounds: int  # 最多讨论轮数（默认 3）
-    language: str               # "zh"
-```
-
-### 环境变量
-
-| 变量 | 作用 | 默认值 |
-|------|------|--------|
-| `LLM_API_KEY` | LLM API 密钥 | `no-key` |
-| `LLM_BASE_URL` | LLM API 端点 | `http://localhost:23333/api/openai/v1` |
-| `LLM_MODEL` | 模型名称 | `claude-opus-4.6` |
-| `COMFYUI_URL` | ComfyUI 服务地址 | `http://localhost:8189` |
-| `COMFYUI_WORKFLOW` | 自定义工作流 JSON 路径 | （空，用内置） |
-| `VIDEO_QUALITY` | 视频质量模式 | `fast` |
+| 变量 | 用途 | 默认值 |
+|---|---|---|
+| `LLM_API_KEY` | LLM Key | `no-key` |
+| `LLM_BASE_URL` | LLM Base URL | `http://localhost:23333/api/openai/v1` |
+| `LLM_MODEL` | LLM 模型名 | `claude-opus-4.6` |
+| `COMFYUI_URL` | ComfyUI 地址 | `http://localhost:8188` |
+| `COMFYUI_WORKFLOW` | 自定义工作流路径 | 空 |
+| `VIDEO_QUALITY` | 工作流模式 | `fast` |
 | `VIDEO_OUTPUT_DIR` | 输出目录 | `./output` |
+| `IMAGE_GEN_URL` | 参考图 API URL | 空 |
+| `IMAGE_GEN_KEY` | 参考图 API Key | 空 |
+
+### 4.2 关键 dataclass
+
+- `LLMConfig`
+- `VideoConfig`
+- `ImageGenConfig`
+- `PipelineConfig`
 
 ---
 
-## 使用方法
+## 5. 安装
 
-### 安装
+### 5.1 Python 依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-额外需要：
-- **ComfyUI**（本地运行，加载 Wan2.2 14B 模型）
-- **ffmpeg**（用于视频合成，需加入 PATH）
-
-### 命令行参数
+### 5.2 Electron UI 依赖
 
 ```bash
-python main.py [选项]
+cd ui
+npm install
 ```
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--topic TEXT` | 视频主题（不指定则交互输入） | — |
-| `--discuss-only` | 只讨论不生成视频 | `false` |
-| `--api-key TEXT` | LLM API Key | 环境变量 |
-| `--base-url TEXT` | LLM API 地址 | 环境变量 |
-| `--model TEXT` | LLM 模型名称 | 环境变量 |
-| `--comfyui-url TEXT` | ComfyUI 地址 | `http://localhost:8189` |
-| `--workflow PATH` | 自定义工作流 JSON | 内置默认 |
-| `--quality fast\|quality` | 视频质量模式 | `fast` |
-| `--width INT` | 视频宽度 | `640` |
-| `--height INT` | 视频高度 | `640` |
-| `--length INT` | 视频帧数 | `81` |
-| `--fps INT` | 帧率 | `16` |
-| `--output-dir PATH` | 输出目录 | `./output` |
-| `--max-rounds INT` | 最大讨论轮数 | `3` |
+### 5.3 外部前置
 
-### 示例
+- 已安装并可访问的 ComfyUI
+- 已配置 Wan2.2 模型及对应 LoRA
+- 系统可用 `ffmpeg`（PATH 中）
+
+---
+
+## 6. 使用方式
+
+### 6.1 CLI：主题创作（T2V）
 
 ```bash
-# 快速模式，指定主题
-python main.py --topic "4个星座的末日庇护所" --quality fast
+python main.py --mode topic --topic "4个星座的末日庇护所" --quality cocktail_lora
+```
 
-# 高质量模式
-python main.py --topic "深海水母的舞蹈" --quality quality
+仅讨论：
 
-# 只讨论不生成视频（调试 prompt 用）
-python main.py --topic "赛博朋克城市夜景" --discuss-only
+```bash
+python main.py --mode topic --topic "末日避难所" --discuss-only
+```
 
-# 交互模式（运行后手动输入主题）
-python main.py
+### 6.2 CLI：小说改编（I2V Prompt 流程）
 
-# 使用自定义 LLM
-python main.py --base-url http://localhost:11434/v1 --model llama3 --api-key dummy --topic "秋天的城市"
+直接传文本：
+
+```bash
+python main.py --mode novel --novel "你的小说段落..." --discuss-only
+```
+
+从文件读取：
+
+```bash
+python main.py --mode novel --novel-file story.txt --discuss-only
+```
+
+带参考图 API：
+
+```bash
+python main.py --mode novel --novel-file story.txt --image-api http://your-image-api
 ```
 
 ---
 
-## 关键数据结构
+## 7. 启动桌面 UI（Electron）
 
-### `VideoSegmentPrompt`（讨论输出 → 视频生成输入）
-
-```python
-@dataclass
-class VideoSegmentPrompt:
-    index: int              # 片段序号（从 1 开始）
-    time_range: str         # 时间范围，如 "0-5s"
-    copywriting: str        # 中文文案内容
-    scene_description: str  # 中文画面描述
-    camera_type: str        # 镜头类型
-    video_prompt: str       # 英文正向 prompt（用于 AI 视频生成）
-    negative_prompt: str    # 英文反向 prompt
+```bash
+cd ui
+npm start
 ```
 
-### `GeneratedClip`（视频生成输出）
+UI 启动时会自动拉起 `server.py`。
 
-```python
-@dataclass
-class GeneratedClip:
-    index: int        # 片段序号
-    prompt: str       # 使用的 prompt
-    file_path: str    # 视频文件路径
-    status: str       # "success" | "failed" | "pending"
-    error: str        # 错误信息
+### 若遇到 Windows 缓存目录权限问题
+
+使用独立 user-data-dir：
+
+```bash
+cd ui
+npx electron . --user-data-dir="D:\videopipeline\ui\.electron-data"
 ```
 
 ---
 
-## 工作流机制（ComfyUI）
+## 8. Python API（server.py）
 
-`VideoGenerator` 通过节点 ID 映射来注入参数到 ComfyUI 工作流 JSON：
+默认地址：`http://127.0.0.1:5678`
 
-```python
-# workflows/ 目录下的 JSON 是 ComfyUI 导出的工作流
-# 每种模式有一套节点映射：
+常用接口：
 
-"fast": {                                    # wan22_lora4.json
-    "positive_prompt_nodes": ("9",),         # 正向 prompt 注入到节点 9
-    "negative_prompt_nodes": ("13",),        # 反向 prompt 注入到节点 13
-    "latent_nodes": ("14",),                 # 分辨率/帧数注入到节点 14
-    "seed_nodes": ("10",),                   # 随机种子注入到节点 10
-    "output_nodes": ("16",),                 # 输出文件名前缀在节点 16
-}
-
-"quality": {                                 # wan22_full.json
-    "positive_prompt_nodes": ("11",),        # 节点映射不同
-    "negative_prompt_nodes": ("12",),
-    "latent_nodes": ("4",),
-    "seed_nodes": ("6",),
-    "output_nodes": ("14",),
-}
-```
-
-注入逻辑（在 `_build_workflow` 方法中）：
-- 正向/反向 prompt → 修改对应节点的 `inputs.text`
-- 分辨率/帧数 → 修改 latent 节点的 `inputs.width`/`height`/`length`
-- 种子 → 修改 seed 节点的 `inputs.noise_seed`
-- 输出前缀 → 修改 output 节点的 `inputs.filename_prefix`
-
-如需添加新工作流，在 `workflows/` 放入 JSON 文件，并在 `generator.py` 的 `_WORKFLOW_PROFILES` 字典中添加对应的节点映射。
+- `GET /api/health`
+- `GET /api/config`
+- `POST /api/config`
+- `POST /api/topic/start`
+- `POST /api/novel/start`
+- `GET /api/session/{id}`
+- `GET /api/session-logs/{id}?after=...`
+- `GET /api/templates`
+- `POST /api/templates`
+- `DELETE /api/templates/{name}`
 
 ---
 
-## 输出文件
+## 9. 输出文件
 
-每次运行会在 `output/` 下生成：
+主题模式：
 
-| 文件 | 说明 |
-|------|------|
-| `discussion_YYYYMMDD_HHMMSS.md` | 完整讨论记录（Markdown 格式） |
-| `prompts_YYYYMMDD_HHMMSS.json` | 最终 enriched prompts（JSON） |
-| `{session_name}/clip_001.mp4` ... | 各片段视频文件 |
-| `final_{session_name}.mp4` | 最终合成视频 |
+- `output/discussion_*.md`
+- `output/prompts_*.json`
+- `output/{session}/clip_*.mp4`
+- `output/final_*.mp4`
 
-### prompts JSON 格式
+小说模式：
 
-```json
-{
-  "topic": "主题",
-  "visual_style": "镜头师定义的视觉风格",
-  "segments": [
-    {
-      "index": 1,
-      "time_range": "0-5s",
-      "copywriting": "中文文案",
-      "scene_description": "中文画面描述",
-      "camera_type": "镜头类型",
-      "positive_prompt": "English detailed positive prompt...",
-      "negative_prompt": "English negative prompt..."
-    }
-  ]
-}
-```
+- `output/novel_discussion_*.md`
+- `output/novel_prompts_*.json`
+- `output/{session}/ref_images/ref_*.png`（接入参考图 API 后）
 
 ---
 
-## Agent 设计要点
+## 10. 二次开发指南
 
-### 文案师 (`copywriter.py`)
-- System prompt 要求输出固定格式：`## 总体构思` + `## 分段文案`（每段含"文案内容"和"画面描述"）
-- 第 1 轮直接根据主题创作；后续轮次根据裁判反馈修改
+### 10.1 新增工作流模式
 
-### 镜头师 (`cinematographer.py`)
-- System prompt 要求输出：`## 视觉风格定义` + `## 分镜设计`（每段含"镜头类型""构图""运动方式"和**英文 video 生成 prompt**）
-- **关键**：prompt 必须英文，且所有片段必须保持视觉风格一致
+1. 将工作流 JSON 放到 `workflows/wan2.2/`
+2. 在 `video/generator.py` 的 `_WORKFLOW_PROFILES` 添加映射：
+   - `file`
+   - `positive_prompt_nodes`
+   - `negative_prompt_nodes`
+   - `latent_nodes`
+   - `seed_nodes`
+   - `output_nodes`
+3. 在 `main.py` 的 `--quality` 选项、UI 下拉中补充该模式
 
-### 裁判 (`judge.py`)
-- 评审维度：文案质量、镜头设计、**风格一致性（最高优先级）**、Prompt 质量、整体协调
-- 通过判定标记：输出中包含 `✅ 通过` 字样
-- 通过后额外执行 `enrich_prompts()`：用独立的低温度 (0.3) LLM 调用，将讨论综合为每段的 `positive_prompt` + `negative_prompt`，输出纯 JSON 数组
+### 10.2 接入你的 Qwen-Image API
 
-### 讨论协调器 (`discussion.py`)
-- `DiscussionOrchestrator.run(topic)` 是讨论入口
-- 维护全局 `history: list[Message]`，每个 Agent 发言都能看到完整历史
-- 到达最大轮数强制通过
-- 返回 `DiscussionResult`，包含 `final_prompts: list[VideoSegmentPrompt]`
+修改 `video/image_generator.py` 的 `QwenImageGenerator.generate()`：
 
----
+- 请求 URL
+- 请求体字段
+- 响应解析（二进制 / base64 / image_url）
 
-## BaseAgent 机制
+### 10.3 接入 I2V 自动生成
 
-所有 Agent 继承自 `BaseAgent`：
-
-```python
-class BaseAgent(ABC):
-    def __init__(self, name: str, llm_config: LLMConfig)  # 初始化 OpenAI client
-    def system_prompt(self) -> str                          # 抽象：角色系统提示词
-    def build_user_prompt(self, topic, history, round_num) -> str  # 抽象：构建 user prompt
-    def respond(self, topic, history, round_num) -> Message # 调用 LLM 生成回复
-    def format_history(history) -> str                      # 静态：格式化历史消息
-```
-
-LLM 调用使用 OpenAI SDK `chat.completions.create()`，超时 300 秒，兼容任何 OpenAI API 格式的端点。
+在 `main.py` 的 `run_novel_pipeline()` 中，Phase 4 已预留接入位置。
 
 ---
 
-## 依赖 / 前置条件
+## 11. 已知说明
 
-1. **Python 3.10+**
-2. **pip install openai**（唯一 Python 依赖）
-3. **ComfyUI 本地运行**，加载 Wan2.2 14B 模型和对应 LoRA（快速模式需要 LightX2V LoRA）
-4. **ffmpeg** 在 PATH 中可用（用于视频合成）
-5. **OpenAI 兼容的 LLM API**（本地代理、OpenAI、Claude 等均可，只要兼容 OpenAI SDK 格式）
-
----
-
-## 扩展指南
-
-- **添加新工作流**：将 ComfyUI 导出的 JSON 放入 `workflows/`，在 `generator.py` 的 `_WORKFLOW_PROFILES` 中注册节点映射
-- **添加新 Agent**：继承 `BaseAgent`，实现 `system_prompt()` 和 `build_user_prompt()`，在 `DiscussionOrchestrator` 中集成
-- **修改讨论流程**：编辑 `DiscussionOrchestrator.run()` 方法中的 Agent 调用顺序
-- **调整 prompt 格式**：修改各 Agent 的 `system_prompt()` 中的格式要求
-- **修改视频参数**：通过命令行参数或 `config.py` 调整分辨率、帧数、超时时间等
+- Electron 控制台可能出现 Chromium 缓存警告，不一定影响 UI 功能。
+- `icon.png` 缺失只会触发警告，不影响主流程。
+- 小说模式目前侧重 Prompt 流程和接口预留，I2V 自动化依赖你提供的工作流接口格式。

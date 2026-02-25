@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Video Master</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- 侧边栏 -->
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">🎬</div>
+      <h1>AI Video<br>Master</h1>
+    </div>
+    <ul class="nav-list">
+      <li class="nav-item active" data-page="topic">
+        <span class="nav-icon">🎯</span>
+        <span class="nav-label">主题创作</span>
+      </li>
+      <li class="nav-item" data-page="novel">
+        <span class="nav-icon">📖</span>
+        <span class="nav-label">小说改编</span>
+      </li>
+      <li class="nav-item" data-page="templates">
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">模板管理</span>
+      </li>
+      <li class="nav-item" data-page="settings">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">设置</span>
+      </li>
+    </ul>
+    <div class="sidebar-footer">
+      <div class="status-dot" id="serverStatus"></div>
+      <span id="serverStatusText">连接中...</span>
+    </div>
+  </nav>
+
+  <!-- 主内容区 -->
+  <main class="content">
+
+    <!-- ========== 主题创作页 ========== -->
+    <section class="page active" id="page-topic">
+      <div class="page-header">
+        <h2>🎯 主题创作 (T2V)</h2>
+        <p class="subtitle">输入主题 → Agent 讨论 → 自动生成视频</p>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label>视频主题</label>
+          <input type="text" id="topicInput" placeholder="例：4个星座的末日庇护所" class="input-lg">
+        </div>
+        <div class="form-group">
+          <label>质量模式</label>
+          <select id="topicQuality">
+            <option value="fast">⚡ 快速 (~60s/段)</option>
+            <option value="quality">🎨 高质量 (~10min/段)</option>
+            <option value="cocktail_lora">🍸 鸡尾酒LoRA (10步)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="checkbox-label">
+          <input type="checkbox" id="topicDiscussOnly">
+          <span>仅讨论（不生成视频）</span>
+        </label>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="topicStartBtn" onclick="startTopicPipeline()">
+            ▶ 开始
+          </button>
+          <button class="btn btn-secondary" id="topicStopBtn" onclick="stopWatching()" disabled>
+            ⏹ 停止监控
+          </button>
+        </div>
+      </div>
+
+      <!-- 实时日志 -->
+      <div class="log-panel" id="topicLogPanel">
+        <div class="log-header">
+          <span>📡 实时日志</span>
+          <span class="log-status" id="topicRunStatus"></span>
+        </div>
+        <div class="log-body" id="topicLogs">
+          <div class="log-placeholder">等待开始...</div>
+        </div>
+      </div>
+
+      <!-- 结果面板 -->
+      <div class="result-panel hidden" id="topicResultPanel">
+        <div class="result-header">
+          <h3>📊 生成结果</h3>
+        </div>
+        <div class="result-body" id="topicResults"></div>
+      </div>
+    </section>
+
+    <!-- ========== 小说改编页 ========== -->
+    <section class="page" id="page-novel">
+      <div class="page-header">
+        <h2>📖 小说改编 (I2V)</h2>
+        <p class="subtitle">输入小说文字 → 场景拆分 → 参考图 → 图生视频</p>
+      </div>
+
+      <div class="form-group">
+        <label>小说文字 <span class="char-count" id="novelCharCount">0 字</span></label>
+        <textarea id="novelInput" rows="8" placeholder="粘贴小说文字（建议 500 字以内）..."
+          oninput="updateCharCount()"></textarea>
+      </div>
+
+      <div class="form-row">
+        <label class="checkbox-label">
+          <input type="checkbox" id="novelDiscussOnly" checked>
+          <span>仅讨论（不生成图片/视频）</span>
+        </label>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="novelStartBtn" onclick="startNovelPipeline()">
+            ▶ 开始改编
+          </button>
+          <button class="btn btn-secondary" id="novelStopBtn" onclick="stopWatching()" disabled>
+            ⏹ 停止监控
+          </button>
+        </div>
+      </div>
+
+      <div class="log-panel" id="novelLogPanel">
+        <div class="log-header">
+          <span>📡 实时日志</span>
+          <span class="log-status" id="novelRunStatus"></span>
+        </div>
+        <div class="log-body" id="novelLogs">
+          <div class="log-placeholder">等待开始...</div>
+        </div>
+      </div>
+
+      <div class="result-panel hidden" id="novelResultPanel">
+        <div class="result-header"><h3>📊 改编结果</h3></div>
+        <div class="result-body" id="novelResults"></div>
+      </div>
+    </section>
+
+    <!-- ========== 模板管理页 ========== -->
+    <section class="page" id="page-templates">
+      <div class="page-header">
+        <h2>📋 优秀模板管理</h2>
+        <p class="subtitle">保存和管理效果好的 Prompt 模板</p>
+      </div>
+
+      <div class="form-row">
+        <button class="btn btn-primary" onclick="loadTemplates()">🔄 刷新</button>
+        <button class="btn btn-secondary" onclick="showAddTemplate()">➕ 新建模板</button>
+      </div>
+
+      <div id="templateList" class="card-grid">
+        <div class="log-placeholder">点击刷新加载模板...</div>
+      </div>
+
+      <!-- 新建模板弹窗 -->
+      <div class="modal hidden" id="templateModal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>新建模板</h3>
+            <button class="btn-close" onclick="hideModal('templateModal')">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>模板名称</label>
+              <input type="text" id="tplName" placeholder="例：末日庇护所-天蝎座隧道">
+            </div>
+            <div class="form-group">
+              <label>描述</label>
+              <input type="text" id="tplDesc" placeholder="简要描述这个模板的风格和效果">
+            </div>
+            <div class="form-group">
+              <label>标签（逗号分隔）</label>
+              <input type="text" id="tplTags" placeholder="末日, 庇护所, 暗黑, 电影感">
+            </div>
+            <div class="form-group">
+              <label>Positive Prompt</label>
+              <textarea id="tplPositive" rows="5" placeholder="英文正向 prompt..."></textarea>
+            </div>
+            <div class="form-group">
+              <label>Negative Prompt</label>
+              <textarea id="tplNegative" rows="3" placeholder="英文反向 prompt..."></textarea>
+            </div>
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label>来源主题</label>
+                <input type="text" id="tplSource">
+              </div>
+              <div class="form-group">
+                <label>评分</label>
+                <input type="number" id="tplScore" min="0" max="10" step="0.5" value="8">
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="hideModal('templateModal')">取消</button>
+            <button class="btn btn-primary" onclick="saveTemplate()">保存</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 设置页 ========== -->
+    <section class="page" id="page-settings">
+      <div class="page-header">
+        <h2>⚙️ 设置</h2>
+        <p class="subtitle">配置 LLM、ComfyUI 和视频生成参数</p>
+      </div>
+
+      <div class="settings-grid">
+        <div class="settings-card">
+          <h3>🧠 LLM 配置</h3>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="cfgLlmKey" placeholder="LLM API Key">
+          </div>
+          <div class="form-group">
+            <label>Base URL</label>
+            <input type="text" id="cfgLlmUrl">
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <input type="text" id="cfgLlmModel">
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>🖥️ ComfyUI 配置</h3>
+          <div class="form-group">
+            <label>ComfyUI URL</label>
+            <input type="text" id="cfgComfyUrl">
+          </div>
+          <div class="form-group">
+            <label>质量模式</label>
+            <select id="cfgQuality">
+              <option value="fast">⚡ 快速 (Lora 4步)</option>
+              <option value="quality">🎨 高质量 (标准 20步)</option>
+              <option value="cocktail_lora">🍸 鸡尾酒LoRA (10步)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>🎬 视频参数</h3>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label>宽度</label>
+              <input type="number" id="cfgWidth" value="640">
+            </div>
+            <div class="form-group flex-1">
+              <label>高度</label>
+              <input type="number" id="cfgHeight" value="640">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label>帧数</label>
+              <input type="number" id="cfgLength" value="81">
+            </div>
+            <div class="form-group flex-1">
+              <label>FPS</label>
+              <input type="number" id="cfgFps" value="16">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>最大讨论轮数</label>
+            <input type="number" id="cfgMaxRounds" value="3" min="1" max="10">
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>🖼️ 参考图 API</h3>
+          <div class="form-group">
+            <label>API URL</label>
+            <input type="text" id="cfgImgUrl" placeholder="http://your-qwen-image-api">
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="cfgImgKey" placeholder="API Key（可选）">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-top: 24px;">
+        <button class="btn btn-primary" onclick="saveSettings()">💾 保存设置</button>
+        <button class="btn btn-secondary" onclick="loadSettings()">🔄 重新加载</button>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

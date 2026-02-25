@@ -10,7 +10,7 @@ from typing import Any
 
 from openai import OpenAI
 
-from config import LLMConfig
+from config import LLMConfig, MIN_LLM_MAX_TOKENS
 
 
 @dataclass
@@ -56,7 +56,7 @@ class BaseAgent(ABC):
             model=self.llm_config.model,
             messages=messages,
             temperature=self.llm_config.temperature,
-            max_tokens=self.llm_config.max_tokens,
+            max_tokens=max(self.llm_config.max_tokens, MIN_LLM_MAX_TOKENS),
         )
         content = response.choices[0].message.content or ""
         return Message(role=self.name, content=content, round_num=round_num)
@@ -73,6 +73,7 @@ class BaseAgent(ABC):
                 "copywriter": "📝 文案师",
                 "cinematographer": "🎬 镜头师",
                 "judge": "⚖️ 裁判",
+                "scene_analyzer": "📖 场景分析师",
                 "system": "🔧 系统",
             }.get(msg.role, msg.role)
             lines.append(f"[第{msg.round_num}轮] {role_label}:\n{msg.content}\n")
