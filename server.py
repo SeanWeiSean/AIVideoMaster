@@ -2,17 +2,27 @@
 Video Pipeline API Server
 为 Electron UI 提供 HTTP API，桥接现有的 Pipeline 功能。
 支持 SSE 实时推送讨论进度。
+
+存储设计：
+  - Job ID = YYYYMMDD_HHMMSS 时间戳（人类可读，与输出文件夹一一对应）
+  - 每个 Job 的数据存储在 output/{job_id}/ 目录下：
+      job.json         — 元数据（状态、参数、结果）
+      prompts.json     — 讨论生成的 prompt
+      discussion.md    — 讨论过程记录
+      clip_001.mp4 ... — 视频片段
+      final.mp4        — 合成视频
+  - 服务器启动时扫描 output/ 恢复所有历史 Job
 """
 from __future__ import annotations
 
+import glob
 import io
 import json
 import os
+import re
 import sys
 import threading
 import time
-import uuid
-from contextlib import redirect_stdout
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -28,53 +38,318 @@ from agents.novel_discussion import NovelDiscussionOrchestrator, NovelPipelineRe
 from templates import TemplateStore
 
 
-# ── 全局状态 ──────────────────────────────────────────────────
+# ── 持久化 Job 存储 ──────────────────────────────────────────
 
-class SessionStore:
-    """管理运行中的 pipeline 会话"""
+class JobStore:
+    """管理 pipeline Job，所有数据持久化到 output/{job_id}/ 目录。
+    
+    Job ID 格式: YYYYMMDD_HHMMSS（如 20260225_203423）
+    重启后自动从磁盘恢复。
+    """
 
-    def __init__(self) -> None:
-        self._sessions: dict[str, dict] = {}
+    def __init__(self, output_dir: str = "./output") -> None:
+        self._jobs: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._output_dir = Path(output_dir)
+        self._output_dir.mkdir(parents=True, exist_ok=True)
+        # 启动时从磁盘恢复
+        self._discover_jobs()
 
-    def create(self) -> str:
-        sid = str(uuid.uuid4())[:8]
+    # ── Job ID 生成 ──
+
+    @staticmethod
+    def generate_id() -> str:
+        """生成新的 Job ID（时间戳格式）"""
+        return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def _job_dir(self, job_id: str) -> Path:
+        return self._output_dir / job_id
+
+    # ── 创建 & 获取 ──
+
+    def create(self, mode: str = "topic", title: str = "") -> str:
+        """创建新 Job 并立即持久化"""
+        job_id = self.generate_id()
+        # 防止同一秒内重复
+        while job_id in self._jobs:
+            time.sleep(0.1)
+            job_id = self.generate_id()
+
+        job_dir = self._job_dir(job_id)
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        job = {
+            "id": job_id,
+            "status": "created",   # created | running | done | error
+            "mode": mode,          # topic | novel
+            "title": title,        # 主题或小说摘要
+            "logs": [],            # 实时日志行（仅内存，不持久化）
+            "result": None,        # 最终结果 JSON
+            "error": "",
+            "created_at": time.time(),
+            "finished_at": None,
+        }
         with self._lock:
-            self._sessions[sid] = {
-                "status": "created",   # created | running | done | error
-                "logs": [],            # 实时日志行
-                "result": None,        # 最终结果 JSON
-                "error": "",
-                "created_at": time.time(),
-            }
-        return sid
+            self._jobs[job_id] = job
+        self._save_meta(job_id)
+        return job_id
 
-    def get(self, sid: str) -> dict | None:
-        return self._sessions.get(sid)
+    def get(self, job_id: str) -> dict | None:
+        return self._jobs.get(job_id)
 
-    def append_log(self, sid: str, line: str) -> None:
-        s = self._sessions.get(sid)
-        if s:
-            s["logs"].append(line)
+    def list_all(self) -> list[dict]:
+        """返回所有 Job 的摘要信息（按创建时间倒序）"""
+        items = []
+        for jid, j in self._jobs.items():
+            result = j.get("result") or {}
+            items.append({
+                "id": jid,
+                "mode": j.get("mode", "topic"),
+                "title": j.get("title", ""),
+                "status": j["status"],
+                "created_at": j["created_at"],
+                "finished_at": j.get("finished_at"),
+                "has_video": bool(result.get("final_video")),
+                "clip_count": len(result.get("clips", [])),
+            })
+        items.sort(key=lambda x: x["created_at"], reverse=True)
+        return items
 
-    def set_status(self, sid: str, status: str) -> None:
-        s = self._sessions.get(sid)
-        if s:
-            s["status"] = status
+    # ── 状态更新（自动持久化）──
 
-    def set_result(self, sid: str, result: Any) -> None:
-        s = self._sessions.get(sid)
-        if s:
-            s["result"] = result
+    def append_log(self, job_id: str, line: str) -> None:
+        j = self._jobs.get(job_id)
+        if j:
+            j["logs"].append(line)
 
-    def set_error(self, sid: str, error: str) -> None:
-        s = self._sessions.get(sid)
-        if s:
-            s["error"] = error
-            s["status"] = "error"
+    def set_status(self, job_id: str, status: str) -> None:
+        j = self._jobs.get(job_id)
+        if j:
+            j["status"] = status
+            if status in ("done", "error"):
+                j["finished_at"] = time.time()
+            self._save_meta(job_id)
+
+    def set_result(self, job_id: str, result: Any) -> None:
+        j = self._jobs.get(job_id)
+        if j:
+            j["result"] = result
+            self._save_meta(job_id)
+
+    def set_error(self, job_id: str, error: str) -> None:
+        j = self._jobs.get(job_id)
+        if j:
+            j["error"] = error
+            j["status"] = "error"
+            j["finished_at"] = time.time()
+            self._save_meta(job_id)
+
+    # ── 持久化 ──
+
+    def _save_meta(self, job_id: str) -> None:
+        """将 Job 元数据写入 output/{job_id}/job.json"""
+        j = self._jobs.get(job_id)
+        if not j:
+            return
+        job_dir = self._job_dir(job_id)
+        job_dir.mkdir(parents=True, exist_ok=True)
+        meta_path = job_dir / "job.json"
+        # 持久化时排除大日志（日志太大，只保留运行期间的内存版本）
+        meta = {k: v for k, v in j.items() if k != "logs"}
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"⚠️ 保存 job.json 失败 [{job_id}]: {e}")
+
+    # ── 启动时恢复 ──
+
+    def _discover_jobs(self) -> None:
+        """扫描 output/ 目录，从磁盘恢复所有历史 Job"""
+        count_new = 0
+        count_legacy = 0
+
+        # 1) 扫描有 job.json 的目录（新格式）
+        for job_json in sorted(self._output_dir.glob("*/job.json")):
+            job_id = job_json.parent.name
+            if job_id in self._jobs:
+                continue
+            try:
+                with open(job_json, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                meta["logs"] = []  # 日志不持久化
+                meta.setdefault("id", job_id)
+                self._jobs[job_id] = meta
+                count_new += 1
+            except Exception as e:
+                print(f"⚠️ 读取 {job_json} 失败: {e}")
+
+        # 2) 扫描旧格式数据（output/prompts_YYYYMMDD_HHMMSS.json + 同名文件夹）
+        #    为它们创建 job.json 以便统一管理
+        for prompts_file in sorted(self._output_dir.glob("prompts_????????_??????.json")):
+            match = re.search(r"prompts_(\d{8}_\d{6})\.json", prompts_file.name)
+            if not match:
+                continue
+            job_id = match.group(1)
+            if job_id in self._jobs:
+                continue
+            try:
+                job = self._import_legacy_job(job_id, prompts_file)
+                if job:
+                    self._jobs[job_id] = job
+                    self._save_meta(job_id)
+                    count_legacy += 1
+            except Exception as e:
+                print(f"⚠️ 导入旧数据 {prompts_file.name} 失败: {e}")
+
+        # 3) 扫描旧格式小说数据（output/novel_prompts_YYYYMMDD_HHMMSS.json）
+        for prompts_file in sorted(self._output_dir.glob("novel_prompts_????????_??????.json")):
+            match = re.search(r"novel_prompts_(\d{8}_\d{6})\.json", prompts_file.name)
+            if not match:
+                continue
+            job_id = match.group(1)
+            if job_id in self._jobs:
+                continue
+            try:
+                job = self._import_legacy_novel_job(job_id, prompts_file)
+                if job:
+                    self._jobs[job_id] = job
+                    self._save_meta(job_id)
+                    count_legacy += 1
+            except Exception as e:
+                print(f"⚠️ 导入旧数据 {prompts_file.name} 失败: {e}")
+
+        if count_new or count_legacy:
+            print(f"📂 已恢复 {count_new + count_legacy} 个历史 Job（新格式 {count_new}，旧数据导入 {count_legacy}）")
+
+    def _import_legacy_job(self, job_id: str, prompts_file: Path) -> dict | None:
+        """从旧格式 prompts_*.json 导入为标准 Job"""
+        with open(prompts_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        topic = data.get("topic", "")
+        segments = data.get("segments", [])
+
+        # 检查是否有对应的 clips 文件夹
+        clip_dir = self._output_dir / job_id
+        clips = []
+        if clip_dir.is_dir():
+            for mp4 in sorted(clip_dir.glob("clip_*.mp4")):
+                idx_match = re.search(r"clip_(\d+)\.mp4", mp4.name)
+                if idx_match:
+                    clips.append({
+                        "index": int(idx_match.group(1)),
+                        "file_path": str(mp4),
+                        "status": "success",
+                        "error": "",
+                    })
+
+        # 检查最终视频
+        final_video = ""
+        final_path = self._output_dir / f"final_{job_id}.mp4"
+        if final_path.exists():
+            # 移动到 job 目录内
+            new_final = clip_dir / "final.mp4" if clip_dir.is_dir() else final_path
+            if clip_dir.is_dir() and not (clip_dir / "final.mp4").exists():
+                try:
+                    import shutil
+                    shutil.copy2(final_path, new_final)
+                except Exception:
+                    new_final = final_path
+            final_video = str(new_final)
+
+        # 检查讨论记录
+        discussion_file = self._output_dir / f"discussion_{job_id}.md"
+
+        # 推算创建时间
+        try:
+            dt = datetime.strptime(job_id, "%Y%m%d_%H%M%S")
+            created_at = dt.timestamp()
+        except ValueError:
+            created_at = prompts_file.stat().st_mtime
+
+        result_data = {
+            "topic": topic,
+            "visual_style": data.get("visual_style", ""),
+            "segments": [
+                {
+                    "index": s.get("index", i + 1),
+                    "time_range": s.get("time_range", ""),
+                    "copywriting": s.get("copywriting", ""),
+                    "scene_description": s.get("scene_description", ""),
+                    "camera_type": s.get("camera_type", ""),
+                    "positive_prompt": s.get("positive_prompt", ""),
+                    "negative_prompt": s.get("negative_prompt", ""),
+                }
+                for i, s in enumerate(segments)
+            ],
+            "clips": clips,
+            "prompts_json": str(prompts_file),
+        }
+        if final_video:
+            result_data["final_video"] = final_video
+        if discussion_file.exists():
+            result_data["discussion_file"] = str(discussion_file)
+
+        return {
+            "id": job_id,
+            "status": "done",
+            "mode": "topic",
+            "title": topic[:100] if topic else f"旧任务 {job_id}",
+            "logs": [],
+            "result": result_data,
+            "error": "",
+            "created_at": created_at,
+            "finished_at": created_at,
+        }
+
+    def _import_legacy_novel_job(self, job_id: str, prompts_file: Path) -> dict | None:
+        """从旧格式 novel_prompts_*.json 导入为标准 Job"""
+        with open(prompts_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        novel_text = data.get("novel_text", "")
+        segments = data.get("segments", [])
+
+        try:
+            dt = datetime.strptime(job_id, "%Y%m%d_%H%M%S")
+            created_at = dt.timestamp()
+        except ValueError:
+            created_at = prompts_file.stat().st_mtime
+
+        result_data = {
+            "novel_text": novel_text[:200] if novel_text else "",
+            "visual_style": data.get("visual_style", ""),
+            "segments": [
+                {
+                    "index": s.get("index", i + 1),
+                    "time_range": s.get("time_range", ""),
+                    "narration": s.get("narration", ""),
+                    "scene_description": s.get("scene_description", ""),
+                    "camera_type": s.get("camera_type", ""),
+                    "image_prompt": s.get("image_prompt", ""),
+                    "video_prompt": s.get("video_prompt", ""),
+                    "negative_prompt": s.get("negative_prompt", ""),
+                }
+                for i, s in enumerate(segments)
+            ],
+            "prompts_json": str(prompts_file),
+        }
+
+        return {
+            "id": job_id,
+            "status": "done",
+            "mode": "novel",
+            "title": novel_text[:100] if novel_text else f"旧任务 {job_id}",
+            "logs": [],
+            "result": result_data,
+            "error": "",
+            "created_at": created_at,
+            "finished_at": created_at,
+        }
 
 
-sessions = SessionStore()
+jobs = JobStore()
 template_store = TemplateStore()
 
 # ── 当前配置（可通过 API 修改）────────────────────────────────
@@ -124,20 +399,19 @@ def _build_config() -> PipelineConfig:
 # ── 日志捕获 ─────────────────────────────────────────────────
 
 class LogCapture(io.StringIO):
-    """捕获 print 输出并推送到 session logs"""
+    """捕获 print 输出并推送到 job logs"""
 
-    def __init__(self, session_id: str, original_stdout) -> None:
+    def __init__(self, job_id: str, original_stdout) -> None:
         super().__init__()
-        self.session_id = session_id
+        self.job_id = job_id
         self.original = original_stdout
 
     def write(self, s: str) -> int:
         if s.strip():
-            sessions.append_log(self.session_id, s.rstrip())
+            jobs.append_log(self.job_id, s.rstrip())
         try:
             self.original.write(s)
         except (UnicodeEncodeError, OSError):
-            # Windows 控制台编码问题，忽略
             pass
         return len(s)
 
@@ -147,22 +421,23 @@ class LogCapture(io.StringIO):
 
 # ── Pipeline 运行线程 ────────────────────────────────────────
 
-def _run_topic_pipeline(sid: str, topic: str, discuss_only: bool) -> None:
+def _run_topic_pipeline(job_id: str, topic: str, discuss_only: bool) -> None:
     """在后台线程中运行主题管线"""
-    capture = LogCapture(sid, sys.stdout)
+    capture = LogCapture(job_id, sys.stdout)
     old_stdout = sys.stdout
     sys.stdout = capture
 
     try:
-        sessions.set_status(sid, "running")
+        jobs.set_status(job_id, "running")
         config = _build_config()
         orchestrator = DiscussionOrchestrator(config)
         result = orchestrator.run(topic)
 
-        # 保存讨论结果
+        # 保存讨论结果到 Job 目录
+        job_dir = str(jobs._job_dir(job_id))
         from main import save_discussion_result, save_prompts_json
-        save_discussion_result(result, config.video.output_dir)
-        json_path = save_prompts_json(result, config.video.output_dir)
+        save_discussion_result(result, job_dir)
+        json_path = save_prompts_json(result, job_dir)
 
         # 构建结果
         result_data = {
@@ -186,40 +461,57 @@ def _run_topic_pipeline(sid: str, topic: str, discuss_only: bool) -> None:
         }
 
         if not discuss_only and result.final_prompts:
-            # 视频生成
+            # 视频生成 — 使用 job_id 作为 session_name，clips 存到 job 目录
             from video.generator import VideoGenerator
-            session_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+            from video.composer import VideoComposer
             generator = VideoGenerator(config.video)
-            clips = generator.generate_all(result.final_prompts, session_name)
+            clips = generator.generate_all(result.final_prompts, job_id)
             result_data["clips"] = [
                 {"index": c.index, "file_path": c.file_path, "status": c.status, "error": c.error}
                 for c in clips
             ]
 
-        sessions.set_result(sid, result_data)
-        sessions.set_status(sid, "done")
+            # 视频合成
+            valid_clips = [c for c in clips if c.status == "success"]
+            if valid_clips:
+                try:
+                    composer = VideoComposer(config.video.output_dir)
+                    output_name = f"{job_id}/final.mp4"
+                    final_path = composer.compose(valid_clips, output_name)
+                    result_data["final_video"] = final_path
+                    print(f"\n🎉 最终视频已合成: {final_path}")
+                except Exception as e:
+                    print(f"\n⚠️ 视频合成失败: {e}")
+                    result_data["compose_error"] = str(e)
+            else:
+                print("\n⚠️ 没有成功的视频片段，跳过合成")
+
+        jobs.set_result(job_id, result_data)
+        jobs.set_status(job_id, "done")
 
     except Exception as e:
-        sessions.set_error(sid, str(e))
+        jobs.set_error(job_id, str(e))
     finally:
         sys.stdout = old_stdout
 
 
-def _run_novel_pipeline(sid: str, novel_text: str, discuss_only: bool) -> None:
+def _run_novel_pipeline(job_id: str, novel_text: str, discuss_only: bool) -> None:
     """在后台线程中运行小说改编管线"""
-    capture = LogCapture(sid, sys.stdout)
+    capture = LogCapture(job_id, sys.stdout)
     old_stdout = sys.stdout
     sys.stdout = capture
 
     try:
-        sessions.set_status(sid, "running")
+        jobs.set_status(job_id, "running")
         config = _build_config()
         orchestrator = NovelDiscussionOrchestrator(config)
         result = orchestrator.run(novel_text)
 
+        # 保存到 Job 目录
+        job_dir = str(jobs._job_dir(job_id))
         from main import save_novel_result, save_novel_prompts_json
-        save_novel_result(result, config.video.output_dir)
-        json_path = save_novel_prompts_json(result, config.video.output_dir)
+        save_novel_result(result, job_dir)
+        json_path = save_novel_prompts_json(result, job_dir)
 
         result_data = {
             "novel_text": result.novel_text[:200],
@@ -241,11 +533,36 @@ def _run_novel_pipeline(sid: str, novel_text: str, discuss_only: bool) -> None:
                 for p in result.final_prompts
             ],
         }
-        sessions.set_result(sid, result_data)
-        sessions.set_status(sid, "done")
+
+        if not discuss_only and result.final_prompts:
+            from video.generator import VideoGenerator
+            from video.composer import VideoComposer
+            generator = VideoGenerator(config.video)
+            clips = generator.generate_all(result.final_prompts, job_id)
+            result_data["clips"] = [
+                {"index": c.index, "file_path": c.file_path, "status": c.status, "error": c.error}
+                for c in clips
+            ]
+
+            valid_clips = [c for c in clips if c.status == "success"]
+            if valid_clips:
+                try:
+                    composer = VideoComposer(config.video.output_dir)
+                    output_name = f"{job_id}/final.mp4"
+                    final_path = composer.compose(valid_clips, output_name)
+                    result_data["final_video"] = final_path
+                    print(f"\n🎉 最终视频已合成: {final_path}")
+                except Exception as e:
+                    print(f"\n⚠️ 视频合成失败: {e}")
+                    result_data["compose_error"] = str(e)
+            else:
+                print("\n⚠️ 没有成功的视频片段，跳过合成")
+
+        jobs.set_result(job_id, result_data)
+        jobs.set_status(job_id, "done")
 
     except Exception as e:
-        sessions.set_error(sid, str(e))
+        jobs.set_error(job_id, str(e))
     finally:
         sys.stdout = old_stdout
 
@@ -299,6 +616,41 @@ class APIHandler(BaseHTTPRequestHandler):
         with open(full_path, "rb") as f:
             self.wfile.write(f.read())
 
+    def _serve_output_file(self, file_path: str) -> None:
+        """安全地从 output 目录提供文件（视频等）"""
+        from urllib.parse import unquote
+        file_path = unquote(file_path)
+        resolved = Path(file_path).resolve()
+        output_root = Path(_current_config["output_dir"]).resolve()
+        # 安全检查：只允许访问 output 目录下的文件
+        if not str(resolved).startswith(str(output_root)):
+            self.send_error(403, "Access denied")
+            return
+        if not resolved.is_file():
+            self.send_error(404, "File not found")
+            return
+        ext = resolved.suffix.lower()
+        mime_map = {
+            ".mp4": "video/mp4",
+            ".webm": "video/webm",
+            ".gif": "image/gif",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".json": "application/json",
+            ".md": "text/markdown; charset=utf-8",
+            ".txt": "text/plain; charset=utf-8",
+        }
+        content_type = mime_map.get(ext, "application/octet-stream")
+        file_size = resolved.stat().st_size
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(file_size))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        with open(resolved, "rb") as f:
+            self.wfile.write(f.read())
+
     def do_OPTIONS(self) -> None:
         self._set_headers(204)
 
@@ -330,30 +682,59 @@ class APIHandler(BaseHTTPRequestHandler):
 
         elif path.startswith("/api/session/"):
             sid = path.split("/")[-1]
-            session = sessions.get(sid)
-            if not session:
-                self._json_response({"error": "Session not found"}, 404)
+            job = jobs.get(sid)
+            if not job:
+                self._json_response({"error": "Job not found"}, 404)
                 return
             self._json_response({
-                "status": session["status"],
-                "log_count": len(session["logs"]),
-                "error": session["error"],
-                "result": session["result"],
+                "status": job["status"],
+                "log_count": len(job["logs"]),
+                "error": job["error"],
+                "result": job["result"],
             })
 
         elif path.startswith("/api/session-logs/"):
             sid = path.split("/")[-1]
-            session = sessions.get(sid)
-            if not session:
-                self._json_response({"error": "Session not found"}, 404)
+            job = jobs.get(sid)
+            if not job:
+                self._json_response({"error": "Job not found"}, 404)
                 return
             after = int(params.get("after", [0])[0])
-            logs = session["logs"][after:]
+            logs = job["logs"][after:]
             self._json_response({
                 "logs": logs,
-                "total": len(session["logs"]),
-                "status": session["status"],
+                "total": len(job["logs"]),
+                "status": job["status"],
             })
+
+        elif path == "/api/jobs":
+            self._json_response(jobs.list_all())
+
+        elif path.startswith("/api/jobs/"):
+            job_id = path.split("/api/jobs/", 1)[1]
+            job = jobs.get(job_id)
+            if not job:
+                self._json_response({"error": "Job not found"}, 404)
+                return
+            self._json_response({
+                "id": job_id,
+                "mode": job.get("mode", "topic"),
+                "title": job.get("title", ""),
+                "status": job["status"],
+                "error": job["error"],
+                "created_at": job["created_at"],
+                "finished_at": job.get("finished_at"),
+                "log_count": len(job["logs"]),
+                "logs": job["logs"],
+                "result": job["result"],
+            })
+
+        elif path == "/api/file":
+            file_path = params.get("path", [""])[0]
+            if not file_path:
+                self._json_response({"error": "path is required"}, 400)
+                return
+            self._serve_output_file(file_path)
 
         elif path == "/api/health":
             self._json_response({"status": "ok", "time": datetime.now().isoformat()})
@@ -377,14 +758,14 @@ class APIHandler(BaseHTTPRequestHandler):
             if not topic:
                 self._json_response({"error": "topic is required"}, 400)
                 return
-            sid = sessions.create()
+            job_id = jobs.create(mode="topic", title=topic[:100])
             t = threading.Thread(
                 target=_run_topic_pipeline,
-                args=(sid, topic, discuss_only),
+                args=(job_id, topic, discuss_only),
                 daemon=True,
             )
             t.start()
-            self._json_response({"session_id": sid})
+            self._json_response({"session_id": job_id, "job_id": job_id})
 
         elif path == "/api/novel/start":
             body = self._read_body()
@@ -393,14 +774,14 @@ class APIHandler(BaseHTTPRequestHandler):
             if not novel_text:
                 self._json_response({"error": "novel_text is required"}, 400)
                 return
-            sid = sessions.create()
+            job_id = jobs.create(mode="novel", title=novel_text[:100])
             t = threading.Thread(
                 target=_run_novel_pipeline,
-                args=(sid, novel_text, discuss_only),
+                args=(job_id, novel_text, discuss_only),
                 daemon=True,
             )
             t.start()
-            self._json_response({"session_id": sid})
+            self._json_response({"session_id": job_id, "job_id": job_id})
 
         elif path == "/api/config":
             body = self._read_body()

@@ -19,6 +19,10 @@ ui/dist/
 ui/out/
 ui/.electron-data/
 
+# Binaries
+ffmpeg
+ffprobe
+
 # Temp files
 _commit_msg.txt
 

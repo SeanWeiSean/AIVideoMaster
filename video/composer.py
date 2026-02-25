@@ -16,13 +16,22 @@ class VideoComposer:
 
     def __init__(self, output_dir: str = "./output") -> None:
         self.output_dir = Path(output_dir)
-        self._check_ffmpeg()
+        self.ffmpeg_bin = self._find_ffmpeg()
 
-    def _check_ffmpeg(self) -> None:
-        """检查 ffmpeg 是否可用"""
-        if not shutil.which("ffmpeg"):
-            print("⚠️ 未检测到 ffmpeg，视频合成功能将不可用。")
-            print("  请安装 ffmpeg: https://ffmpeg.org/download.html")
+    def _find_ffmpeg(self) -> str:
+        """查找 ffmpeg 可执行文件：优先项目根目录的本地二进制，其次系统 PATH"""
+        # 优先使用项目根目录下的 ffmpeg
+        local_ffmpeg = Path(__file__).resolve().parent.parent / "ffmpeg"
+        if local_ffmpeg.is_file():
+            print(f"🔧 使用本地 ffmpeg: {local_ffmpeg}")
+            return str(local_ffmpeg)
+        # 其次使用系统 PATH 中的 ffmpeg
+        system_ffmpeg = shutil.which("ffmpeg")
+        if system_ffmpeg:
+            return system_ffmpeg
+        print("⚠️ 未检测到 ffmpeg，视频合成功能将不可用。")
+        print("  请安装 ffmpeg: https://ffmpeg.org/download.html")
+        return "ffmpeg"  # fallback，运行时会报错
 
     def compose(
         self,
@@ -50,7 +59,7 @@ class VideoComposer:
 
         # 使用 ffmpeg concat 合并
         cmd = [
-            "ffmpeg",
+            self.ffmpeg_bin,
             "-y",  # 覆盖输出
             "-f", "concat",
             "-safe", "0",
@@ -103,7 +112,7 @@ class VideoComposer:
         filter_str += f"concat=n={len(clips)}:v=1:a=0[outv]"
 
         cmd = [
-            "ffmpeg", "-y",
+            self.ffmpeg_bin, "-y",
             *inputs,
             "-filter_complex", filter_str,
             "-map", "[outv]",

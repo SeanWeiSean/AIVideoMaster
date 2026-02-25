@@ -27,6 +27,10 @@
         <span class="nav-icon">📋</span>
         <span class="nav-label">模板管理</span>
       </li>
+      <li class="nav-item" data-page="jobs">
+        <span class="nav-icon">📁</span>
+        <span class="nav-label">作品库</span>
+      </li>
       <li class="nav-item" data-page="settings">
         <span class="nav-icon">⚙️</span>
         <span class="nav-label">设置</span>
@@ -202,6 +206,32 @@
             <button class="btn btn-primary" onclick="saveTemplate()">保存</button>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ========== 作品库页 ========== -->
+    <section class="page" id="page-jobs">
+      <div class="page-header" id="jobsListHeader">
+        <h2>📁 作品库</h2>
+        <p class="subtitle">查看所有任务历史，点击查看详细素材</p>
+      </div>
+
+      <div class="form-row" id="jobsToolbar">
+        <button class="btn btn-primary" onclick="loadJobs()">🔄 刷新</button>
+      </div>
+
+      <div id="jobsList" class="job-list">
+        <div class="log-placeholder">点击刷新加载任务...</div>
+      </div>
+
+      <!-- 作品详情视图（动态显示/隐藏） -->
+      <div id="jobDetailView" class="hidden">
+        <div class="job-detail-header">
+          <button class="btn btn-secondary" onclick="backToJobList()">← 返回列表</button>
+          <h3 id="jobDetailTitle"></h3>
+          <span class="job-detail-id" id="jobDetailId"></span>
+        </div>
+        <div id="jobDetailBody"></div>
       </div>
     </section>
 
