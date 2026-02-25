@@ -20,10 +20,11 @@ from agents.discussion import VideoSegmentPrompt
 _WORKFLOWS_DIR = Path(__file__).resolve().parent.parent / "workflows"
 
 # 每种模式的工作流文件和节点映射
+# file 路径相对于 _WORKFLOWS_DIR，按 模型名/文件名 组织
 _WORKFLOW_PROFILES: dict[str, dict] = {
     "fast": {
         # Wan2.2 14B + LightX2V Lora 4步（~60s）
-        "file": "wan22_lora4.json",
+        "file": "wan2.2/wan22_lora4.json",
         "positive_prompt_nodes": ("9",),
         "negative_prompt_nodes": ("13",),
         "latent_nodes": ("14",),
@@ -32,7 +33,7 @@ _WORKFLOW_PROFILES: dict[str, dict] = {
     },
     "quality": {
         # Wan2.2 14B 标准 20步（~10min）
-        "file": "wan22_full.json",
+        "file": "wan2.2/wan22_full.json",
         "positive_prompt_nodes": ("11",),
         "negative_prompt_nodes": ("12",),
         "latent_nodes": ("4",),
