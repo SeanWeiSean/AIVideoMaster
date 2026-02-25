@@ -17,6 +17,10 @@ output/
 ui/node_modules/
 ui/dist/
 ui/out/
+ui/.electron-data/
+
+# Temp files
+_commit_msg.txt
 
 # IDE
 .vscode/
