@@ -206,7 +206,7 @@ class ImageGeneratorPipeline:
             neg_prompt = p.get("negative_prompt", "")
 
             print(f"\n{'─'*50}")
-            print(f"🖼️ 生成参考图 {i}/{total}：片段 {idx}")
+            print(f"[INFO] 生成参考图 {i}/{total}：片段 {idx}")
             print(f"   Prompt: {img_prompt[:100]}...")
             print(f"{'─'*50}")
 
@@ -221,9 +221,9 @@ class ImageGeneratorPipeline:
             result.index = idx
 
             if result.status == "success":
-                print(f"   ✅ 参考图已生成: {result.file_path}")
+                print(f"   [OK] 参考图已生成: {result.file_path}")
             else:
-                print(f"   ❌ 生成失败: {result.error}")
+                print(f"   [ERROR] 生成失败: {result.error}")
 
             results.append(result)
 

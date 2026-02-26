@@ -160,7 +160,7 @@ class JobStore:
             with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"⚠️ 保存 job.json 失败 [{job_id}]: {e}")
+            print(f"[WARN] 保存 job.json 失败 [{job_id}]: {e}")
 
     # ── 启动时恢复 ──
 
@@ -182,7 +182,7 @@ class JobStore:
                 self._jobs[job_id] = meta
                 count_new += 1
             except Exception as e:
-                print(f"⚠️ 读取 {job_json} 失败: {e}")
+                print(f"[WARN] 读取 {job_json} 失败: {e}")
 
         # 2) 扫描旧格式数据（output/prompts_YYYYMMDD_HHMMSS.json + 同名文件夹）
         #    为它们创建 job.json 以便统一管理
@@ -200,7 +200,7 @@ class JobStore:
                     self._save_meta(job_id)
                     count_legacy += 1
             except Exception as e:
-                print(f"⚠️ 导入旧数据 {prompts_file.name} 失败: {e}")
+                print(f"[WARN] 导入旧数据 {prompts_file.name} 失败: {e}")
 
         # 3) 扫描旧格式小说数据（output/novel_prompts_YYYYMMDD_HHMMSS.json）
         for prompts_file in sorted(self._output_dir.glob("novel_prompts_????????_??????.json")):
@@ -217,10 +217,10 @@ class JobStore:
                     self._save_meta(job_id)
                     count_legacy += 1
             except Exception as e:
-                print(f"⚠️ 导入旧数据 {prompts_file.name} 失败: {e}")
+                print(f"[WARN] 导入旧数据 {prompts_file.name} 失败: {e}")
 
         if count_new or count_legacy:
-            print(f"📂 已恢复 {count_new + count_legacy} 个历史 Job（新格式 {count_new}，旧数据导入 {count_legacy}）")
+            print(f"[INFO] 已恢复 {count_new + count_legacy} 个历史 Job（新格式 {count_new}，旧数据导入 {count_legacy}）")
 
     def _import_legacy_job(self, job_id: str, prompts_file: Path) -> dict | None:
         """从旧格式 prompts_*.json 导入为标准 Job"""
@@ -479,12 +479,12 @@ def _run_topic_pipeline(job_id: str, topic: str, discuss_only: bool) -> None:
                     output_name = f"{job_id}/final.mp4"
                     final_path = composer.compose(valid_clips, output_name)
                     result_data["final_video"] = final_path
-                    print(f"\n🎉 最终视频已合成: {final_path}")
+                    print(f"\n[OK] 最终视频已合成: {final_path}")
                 except Exception as e:
-                    print(f"\n⚠️ 视频合成失败: {e}")
+                    print(f"\n[WARN] 视频合成失败: {e}")
                     result_data["compose_error"] = str(e)
             else:
-                print("\n⚠️ 没有成功的视频片段，跳过合成")
+                print("\n[WARN] 没有成功的视频片段，跳过合成")
 
         jobs.set_result(job_id, result_data)
         jobs.set_status(job_id, "done")
@@ -551,12 +551,12 @@ def _run_novel_pipeline(job_id: str, novel_text: str, discuss_only: bool) -> Non
                     output_name = f"{job_id}/final.mp4"
                     final_path = composer.compose(valid_clips, output_name)
                     result_data["final_video"] = final_path
-                    print(f"\n🎉 最终视频已合成: {final_path}")
+                    print(f"\n[OK] 最终视频已合成: {final_path}")
                 except Exception as e:
-                    print(f"\n⚠️ 视频合成失败: {e}")
+                    print(f"\n[WARN] 视频合成失败: {e}")
                     result_data["compose_error"] = str(e)
             else:
-                print("\n⚠️ 没有成功的视频片段，跳过合成")
+                print("\n[WARN] 没有成功的视频片段，跳过合成")
 
         jobs.set_result(job_id, result_data)
         jobs.set_status(job_id, "done")

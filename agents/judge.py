@@ -38,7 +38,7 @@ class JudgeAgent(BaseAgent):
 输出格式要求（严格遵守）：
 ```
 ## 评审结果
-- 状态：✅ 通过 / ❌ 需要修改
+- 状态：[PASS] 通过 / [FAIL] 需要修改
 
 ## 评分
 - 文案质量：X/10
@@ -85,7 +85,7 @@ class JudgeAgent(BaseAgent):
 
     def is_approved(self, response_content: str) -> bool:
         """判断裁判是否通过了方案"""
-        return "✅ 通过" in response_content or "✅通过" in response_content
+        return "[PASS] 通过" in response_content or "[PASS]通过" in response_content
 
     # ── 最终 Enriched Prompt 生成 ─────────────────────────────────
 
@@ -107,9 +107,9 @@ class JudgeAgent(BaseAgent):
         """判断逗号之后是否是 JSON 结构（而非自然语言散文）。
 
         例如:
-          ✓  ", \n    "camera_type": ..."   → ",后面是 "key": 模式，真正的 JSON 逗号
-          ✓  "}, {"                         → 下一个对象
-          ✗  ", an orange kit ..."          → 英文散文，逗号只是句子的一部分
+          OK  ", \n    "camera_type": ..."   → ",后面是 "key": 模式，真正的 JSON 逗号
+          OK  "}, {"                         → 下一个对象
+          NO  ", an orange kit ..."          → 英文散文，逗号只是句子的一部分
         """
         k = comma_pos + 1
         while k < n and text[k] in ' \t\r\n':
@@ -264,7 +264,7 @@ class JudgeAgent(BaseAgent):
                     payload = json.loads(truncated)
                     items = self._coerce_prompt_items(payload)
                     if items:
-                        print(f"   ℹ️ 截断恢复成功，从不完整 JSON 中提取到 {len(items)} 个片段")
+                        print(f"   [INFO] 截断恢复成功，从不完整 JSON 中提取到 {len(items)} 个片段")
                         return items
                 except json.JSONDecodeError:
                     continue
@@ -339,9 +339,9 @@ Now produce the final enriched prompts (positive + negative) for each video segm
 
         # 诊断日志：截断检测 + 原始内容预览
         if finish_reason == "length":
-            print(f"⚠️ LLM 输出因 max_tokens({enrich_max_tokens}) 被截断，JSON 可能不完整。")
+            print(f"[WARN] LLM 输出因 max_tokens({enrich_max_tokens}) 被截断，JSON 可能不完整。")
         if not raw.strip():
-            print("⚠️ LLM 返回了空内容。")
+            print("[WARN] LLM 返回了空内容。")
 
         data = self._parse_enriched_payload(raw)
         if not data:
@@ -352,9 +352,9 @@ Now produce the final enriched prompts (positive + negative) for each video segm
                 output_dir.mkdir(parents=True, exist_ok=True)
                 debug_file = output_dir / f"_debug_enriched_{_dt.now().strftime('%H%M%S')}.txt"
                 debug_file.write_text(raw, encoding="utf-8")
-                print(f"⚠️ 裁判生成的 enriched prompt 解析失败。原始返回已保存: {debug_file}")
+                print(f"[WARN] 裁判生成的 enriched prompt 解析失败。原始返回已保存: {debug_file}")
             except Exception as e:
-                print(f"⚠️ 裁判生成的 enriched prompt 解析失败（debug 保存也失败: {e}）")
+                print(f"[WARN] 裁判生成的 enriched prompt 解析失败（debug 保存也失败: {e}）")
             print(f"   finish_reason={finish_reason}, raw_length={len(raw)}, raw_preview={raw[:300]!r}...")
             return []
 

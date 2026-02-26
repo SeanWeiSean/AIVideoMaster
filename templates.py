@@ -52,7 +52,7 @@ class TemplateStore:
                 for name, item in data.items()
             }
         except (json.JSONDecodeError, TypeError) as e:
-            print(f"⚠️ 模板文件加载失败: {e}")
+            print(f"[WARN] 模板文件加载失败: {e}")
             self._templates = {}
 
     def _save(self) -> None:
@@ -69,7 +69,7 @@ class TemplateStore:
             template.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._templates[template.name] = template
         self._save()
-        print(f"✅ 模板已保存: 「{template.name}」")
+        print(f"[OK] 模板已保存: 「{template.name}」")
 
     def get_template(self, name: str) -> Optional[PromptTemplate]:
         """按名称获取模板"""
@@ -90,27 +90,27 @@ class TemplateStore:
         if name in self._templates:
             del self._templates[name]
             self._save()
-            print(f"🗑️ 模板已删除: 「{name}」")
+            print(f"[OK] 模板已删除: 「{name}」")
             return True
-        print(f"⚠️ 未找到模板: 「{name}」")
+        print(f"[WARN] 未找到模板: 「{name}」")
         return False
 
     def show_all(self) -> None:
         """打印所有模板摘要"""
         templates = self.list_templates()
         if not templates:
-            print("📭 暂无保存的模板")
+            print("暂无保存的模板")
             return
-        print(f"\n📋 已保存 {len(templates)} 个优秀模板:\n")
+        print(f"\n已保存 {len(templates)} 个优秀模板:\n")
         for i, t in enumerate(templates, 1):
             tags_str = ", ".join(t.tags) if t.tags else "无标签"
             prompt_preview = t.positive_prompt[:80] + "..." if len(t.positive_prompt) > 80 else t.positive_prompt
             print(f"  {i}. 「{t.name}」 [{tags_str}]")
             if t.description:
-                print(f"     📝 {t.description}")
-            print(f"     ➕ {prompt_preview}")
+                print(f"     {t.description}")
+            print(f"     + {prompt_preview}")
             if t.quality_score > 0:
-                print(f"     ⭐ 评分: {t.quality_score}/10")
+                print(f"     评分: {t.quality_score}/10")
             print()
 
     # ── 便捷方法 ──────────────────────────────────────────────

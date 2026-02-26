@@ -59,19 +59,19 @@ class DiscussionOrchestrator:
             print(f"{'='*60}\n")
 
             # Step 1: 文案师发言
-            print("📝 文案师正在撰写文案...")
+            print("[copywriter] 文案师正在撰写文案...")
             copywriter_msg = self.copywriter.respond(topic, self.history, round_num)
             self.history.append(copywriter_msg)
             print(f"\n{copywriter_msg.content}\n")
 
             # Step 2: 镜头师发言（基于文案师的方案）
-            print("🎬 镜头师正在设计分镜...")
+            print("[cinematographer] 镜头师正在设计分镜...")
             cinematographer_msg = self.cinematographer.respond(topic, self.history, round_num)
             self.history.append(cinematographer_msg)
             print(f"\n{cinematographer_msg.content}\n")
 
             # Step 3: 裁判评审
-            print("⚖️ 裁判正在评审方案...")
+            print("[judge] 裁判正在评审方案...")
             judge_msg = self.judge.respond(topic, self.history, round_num)
             self.history.append(judge_msg)
             print(f"\n{judge_msg.content}\n")
@@ -79,18 +79,18 @@ class DiscussionOrchestrator:
             # 检查是否通过
             if self.judge.is_approved(judge_msg.content):
                 approved = True
-                print(f"\n✅ 方案在第 {round_num} 轮通过评审！\n")
+                print(f"\n[PASS] 方案在第 {round_num} 轮通过评审！\n")
                 break
             else:
                 if round_num < self.config.max_discussion_rounds:
-                    print(f"\n❌ 方案未通过，进入第 {round_num + 1} 轮讨论...\n")
+                    print(f"\n[FAIL] 方案未通过，进入第 {round_num + 1} 轮讨论...\n")
                 else:
-                    print(f"\n⚠️ 已达到最大讨论轮数（{self.config.max_discussion_rounds}轮），"
+                    print(f"\n[WARN] 已达到最大讨论轮数（{self.config.max_discussion_rounds}轮），"
                           f"使用最终方案。\n")
                     approved = True  # 到达最大轮数，强制采用
 
         # 由裁判生成最终 enriched prompts（正向 + 反向）
-        print("\n🔧 裁判正在生成最终 Enriched Prompts（正向 + 反向）...")
+        print("\n[judge] 裁判正在生成最终 Enriched Prompts（正向 + 反向）...")
         final_prompts = self.judge.enrich_prompts(topic, self.history)
 
         return DiscussionResult(

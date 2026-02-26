@@ -70,7 +70,7 @@ class NovelJudgeAgent(JudgeAgent):
 输出格式要求（严格遵守）：
 ```
 ## 评审结果
-- 状态：✅ 通过 / ❌ 需要修改
+- 状态：[PASS] 通过 / [FAIL] 需要修改
 
 ## 评分
 - 场景拆分：X/10
@@ -183,7 +183,7 @@ Produce the final enriched prompts as a JSON array."""
         finish_reason = getattr(choice, "finish_reason", None)
 
         if finish_reason == "length":
-            print(f"⚠️ LLM 输出因 max_tokens({enrich_max_tokens}) 被截断，JSON 可能不完整。")
+            print(f"[WARN] LLM 输出因 max_tokens({enrich_max_tokens}) 被截断，JSON 可能不完整。")
 
         data = self._parse_enriched_payload(raw)
         if not data:
@@ -192,9 +192,9 @@ Produce the final enriched prompts as a JSON array."""
                 debug_file = Path("output") / f"_debug_novel_enriched_{_dt.now().strftime('%H%M%S')}.txt"
                 debug_file.parent.mkdir(parents=True, exist_ok=True)
                 debug_file.write_text(raw, encoding="utf-8")
-                print(f"⚠️ Enriched prompt 解析失败。原始返回已保存: {debug_file}")
+                print(f"[WARN] Enriched prompt 解析失败。原始返回已保存: {debug_file}")
             except Exception:
-                print("⚠️ Enriched prompt 解析失败，请手动检查。")
+                print("[WARN] Enriched prompt 解析失败，请手动检查。")
             print(f"   finish_reason={finish_reason}, raw_length={len(raw)}, raw_preview={raw[:300]!r}...")
             return []
 
@@ -234,36 +234,36 @@ class NovelDiscussionOrchestrator:
             print(f"{'='*60}\n")
 
             # Step 1: 场景分析师拆分文本
-            print("📖 场景分析师正在拆分文本...")
+            print("[scene_analyzer] 场景分析师正在拆分文本...")
             analyzer_msg = self.scene_analyzer.respond(novel_text, self.history, round_num)
             self.history.append(analyzer_msg)
             print(f"\n{analyzer_msg.content}\n")
 
             # Step 2: 镜头师设计参考图 + 视频 prompt
-            print("🎬 镜头师正在设计参考图和视频 prompt...")
+            print("[cinematographer] 镜头师正在设计参考图和视频 prompt...")
             cinematographer_msg = self.cinematographer.respond(novel_text, self.history, round_num)
             self.history.append(cinematographer_msg)
             print(f"\n{cinematographer_msg.content}\n")
 
             # Step 3: 裁判评审
-            print("⚖️ 裁判正在评审方案...")
+            print("[judge] 裁判正在评审方案...")
             judge_msg = self.judge.respond(novel_text, self.history, round_num)
             self.history.append(judge_msg)
             print(f"\n{judge_msg.content}\n")
 
             if self.judge.is_approved(judge_msg.content):
                 approved = True
-                print(f"\n✅ 方案在第 {round_num} 轮通过评审！\n")
+                print(f"\n[PASS] 方案在第 {round_num} 轮通过评审！\n")
                 break
             else:
                 if round_num < self.config.max_discussion_rounds:
-                    print(f"\n❌ 方案未通过，进入第 {round_num + 1} 轮讨论...\n")
+                    print(f"\n[FAIL] 方案未通过，进入第 {round_num + 1} 轮讨论...\n")
                 else:
-                    print(f"\n⚠️ 已达到最大讨论轮数，使用最终方案。\n")
+                    print(f"\n[WARN] 已达到最大讨论轮数，使用最终方案。\n")
                     approved = True
 
         # 裁判生成最终 enriched prompts
-        print("\n🔧 裁判正在生成最终 Enriched Prompts（参考图 + 视频动作 + 旁白）...")
+        print("\n[judge] 裁判正在生成最终 Enriched Prompts（参考图 + 视频动作 + 旁白）...")
         final_prompts = self.judge.enrich_novel_prompts(novel_text, self.history)
 
         return NovelPipelineResult(

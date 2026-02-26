@@ -56,8 +56,16 @@ body {
 }
 
 .sidebar-header .logo {
-  font-size: 28px;
-  filter: drop-shadow(0 0 8px var(--accent-glow));
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  padding: 4px 8px;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  line-height: 1;
 }
 
 .sidebar-header h1 {
@@ -99,7 +107,6 @@ body {
   border: 1px solid rgba(102,126,234,0.3);
 }
 
-.nav-icon { font-size: 18px; }
 .nav-label { font-size: 14px; font-weight: 500; }
 
 .sidebar-footer {

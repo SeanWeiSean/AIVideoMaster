@@ -133,16 +133,16 @@ class VideoGenerator:
         """根据 quality_mode 选择工作流配置"""
         mode = self.config.quality_mode.lower()
         if mode not in _WORKFLOW_PROFILES:
-            print(f"⚠️ 未知 quality_mode '{mode}'，回退到 fast")
+            print(f"[WARN] 未知 quality_mode '{mode}'，回退到 fast")
             mode = "fast"
         profile = _WORKFLOW_PROFILES[mode]
         labels = {
-            "fast": "⚡ 快速模式 (Lora 4步)",
-            "quality": "🎨 高质量模式 (标准 20步)",
-            "cocktail_lora": "🍸 鸡尾酒LoRA模式 (10步)",
+            "fast": "快速模式 (Lora 4步)",
+            "quality": "高质量模式 (标准 20步)",
+            "cocktail_lora": "鸡尾酒LoRA模式 (10步)",
         }
         label = labels.get(mode, mode)
-        print(f"🎬 {label}")
+        print(f"[INFO] {label}")
         return profile
 
     def _load_workflow(self) -> dict:
@@ -150,12 +150,12 @@ class VideoGenerator:
         path = self.config.workflow_path or ""
         if path and os.path.isfile(path):
             with open(path, "r", encoding="utf-8") as f:
-                print(f"📂 使用自定义工作流: {path}")
+                print(f"[INFO] 使用自定义工作流: {path}")
                 return json.load(f)
         default_path = _WORKFLOWS_DIR / self._profile["file"]
         if default_path.is_file():
             with open(default_path, "r", encoding="utf-8") as f:
-                print(f"📂 使用内置工作流: {default_path.name}")
+                print(f"[INFO] 使用内置工作流: {default_path.name}")
                 return json.load(f)
         raise FileNotFoundError(
             f"找不到工作流文件 {default_path}。请指定 --workflow 或将 JSON 放到 workflows/ 目录"
@@ -200,9 +200,9 @@ class VideoGenerator:
 
     def check_connection(self) -> bool:
         if self.client.is_alive():
-            print(f"✅ ComfyUI 连接正常: {self.config.comfyui_url}")
+            print(f"[OK] ComfyUI 连接正常: {self.config.comfyui_url}")
             return True
-        print(f"❌ 无法连接 ComfyUI: {self.config.comfyui_url}")
+        print(f"[ERROR] 无法连接 ComfyUI: {self.config.comfyui_url}")
         return False
 
     def generate_all(
@@ -229,7 +229,7 @@ class VideoGenerator:
 
         for i, prompt_seg in enumerate(prompts, 1):
             print(f"\n{'─'*50}")
-            print(f"🎬 生成片段 {i}/{total}：{prompt_seg.time_range}")
+            print(f"[INFO] 生成片段 {i}/{total}：{prompt_seg.time_range}")
             print(f"   Prompt: {prompt_seg.video_prompt[:100]}...")
             print(f"{'─'*50}")
 
@@ -237,9 +237,9 @@ class VideoGenerator:
             clips.append(clip)
 
             if clip.status == "success":
-                print(f"   ✅ 生成完成: {clip.file_path}")
+                print(f"   [OK] 生成完成: {clip.file_path}")
             else:
-                print(f"   ❌ 生成失败: {clip.error}")
+                print(f"   [ERROR] 生成失败: {clip.error}")
 
         return clips
 
@@ -255,7 +255,7 @@ class VideoGenerator:
         try:
             workflow = self._build_workflow(prompt, seed=seed)
             prompt_id = self.client.submit_workflow(workflow)
-            print(f"   📤 已提交 prompt_id={prompt_id}")
+            print(f"   [INFO] 已提交 prompt_id={prompt_id}")
 
             task_data = self._wait_for_completion(prompt_id)
             self._download_output(task_data, output_path)
@@ -293,7 +293,7 @@ class VideoGenerator:
                 in_pending = any((len(item) > 1 and item[1] == prompt_id) for item in pending)
                 state = "running" if in_running else ("pending" if in_pending else "—")
 
-                print(f"   ⏳ [{elapsed}s] 状态={state}  运行中={len(running)}  排队={len(pending)}")
+                print(f"   [{elapsed}s] 状态={state}  运行中={len(running)}  排队={len(pending)}")
 
                 if prompt_id in history:
                     task_data = history[prompt_id]
@@ -301,11 +301,11 @@ class VideoGenerator:
                     if status_info.get("status_str") == "error":
                         msgs = status_info.get("messages", [])
                         raise RuntimeError(f"ComfyUI 工作流出错: {msgs}")
-                    print(f"   ✅ 任务完成（耗时 {elapsed}s）")
+                    print(f"   [OK] 任务完成（耗时 {elapsed}s）")
                     return task_data
 
             except error.URLError:
-                print(f"   ⚠️ [{elapsed}s] ComfyUI 暂时无响应，继续等待...")
+                print(f"   [WARN] [{elapsed}s] ComfyUI 暂时无响应，继续等待...")
 
             if timeout > 0 and (time.time() - start) >= timeout:
                 raise TimeoutError(f"视频生成超时（{timeout}s），prompt_id={prompt_id}")
@@ -358,7 +358,7 @@ class VideoGenerator:
             try:
                 self._download_file(secondary, fast_path)
             except Exception as e:
-                print(f"   ⚠️ 快速版下载失败（不影响主输出）: {e}")
+                print(f"   [WARN] 快速版下载失败（不影响主输出）: {e}")
 
     def _download_file(self, file_info: dict, output_path: str) -> None:
         """下载单个文件"""
@@ -366,10 +366,10 @@ class VideoGenerator:
         subfolder = file_info.get("subfolder", "")
         file_type = file_info.get("type", "output")
 
-        print(f"   📥 下载: {filename}")
+        print(f"   [INFO] 下载: {filename}")
         data = self.client.download_output(filename, subfolder, file_type)
 
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         with open(output_path, "wb") as f:
             f.write(data)
-        print(f"   💾 已保存: {output_path} ({len(data) / 1024:.1f} KB)")
+        print(f"   [OK] 已保存: {output_path} ({len(data) / 1024:.1f} KB)")

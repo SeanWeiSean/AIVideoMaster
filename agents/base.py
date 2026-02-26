@@ -70,11 +70,11 @@ class BaseAgent(ABC):
         lines: list[str] = []
         for msg in history:
             role_label = {
-                "copywriter": "📝 文案师",
-                "cinematographer": "🎬 镜头师",
-                "judge": "⚖️ 裁判",
-                "scene_analyzer": "📖 场景分析师",
-                "system": "🔧 系统",
+                "copywriter": "[文案师]",
+                "cinematographer": "[镜头师]",
+                "judge": "[裁判]",
+                "scene_analyzer": "[场景分析师]",
+                "system": "[系统]",
             }.get(msg.role, msg.role)
             lines.append(f"[第{msg.round_num}轮] {role_label}:\n{msg.content}\n")
         return "\n".join(lines)

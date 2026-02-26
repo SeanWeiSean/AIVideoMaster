@@ -23,13 +23,13 @@ class VideoComposer:
         # 优先使用项目根目录下的 ffmpeg
         local_ffmpeg = Path(__file__).resolve().parent.parent / "ffmpeg"
         if local_ffmpeg.is_file():
-            print(f"🔧 使用本地 ffmpeg: {local_ffmpeg}")
+            print(f"[INFO] 使用本地 ffmpeg: {local_ffmpeg}")
             return str(local_ffmpeg)
         # 其次使用系统 PATH 中的 ffmpeg
         system_ffmpeg = shutil.which("ffmpeg")
         if system_ffmpeg:
             return system_ffmpeg
-        print("⚠️ 未检测到 ffmpeg，视频合成功能将不可用。")
+        print("[WARN] 未检测到 ffmpeg，视频合成功能将不可用。")
         print("  请安装 ffmpeg: https://ffmpeg.org/download.html")
         return "ffmpeg"  # fallback，运行时会报错
 
@@ -69,7 +69,7 @@ class VideoComposer:
         ]
 
         try:
-            print(f"\n🎞️ 正在合成视频...")
+            print(f"\n[INFO] 正在合成视频...")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -77,18 +77,18 @@ class VideoComposer:
                 timeout=120,
             )
             if result.returncode != 0:
-                print(f"⚠️ ffmpeg 输出: {result.stderr}")
+                print(f"[WARN] ffmpeg 输出: {result.stderr}")
                 # 尝试重编码方式合并
                 return self._compose_with_reencode(valid_clips, output_path)
 
-            print(f"✅ 视频合成完成: {output_path}")
+            print(f"[OK] 视频合成完成: {output_path}")
             return str(output_path)
 
         except FileNotFoundError:
-            print("❌ ffmpeg 未找到，无法合成视频。")
+            print("[ERROR] ffmpeg 未找到，无法合成视频。")
             raise
         except subprocess.TimeoutExpired:
-            print("❌ 视频合成超时。")
+            print("[ERROR] 视频合成超时。")
             raise
         finally:
             # 清理临时文件
@@ -123,21 +123,21 @@ class VideoComposer:
         if result.returncode != 0:
             raise RuntimeError(f"视频合成失败: {result.stderr}")
 
-        print(f"✅ 视频合成完成（重编码模式）: {output_path}")
+        print(f"[OK] 视频合成完成（重编码模式）: {output_path}")
         return str(output_path)
 
     @staticmethod
     def interactive_select(clips: list[GeneratedClip]) -> list[GeneratedClip]:
         """交互式让用户选择要使用的片段"""
         print("\n" + "=" * 60)
-        print("  📋 请审核生成的视频片段")
+        print("  请审核生成的视频片段")
         print("=" * 60)
 
         selected: list[GeneratedClip] = []
 
         for clip in clips:
             if clip.status != "success":
-                print(f"\n片段 {clip.index}: ❌ 生成失败 - {clip.error}")
+                print(f"\n片段 {clip.index}: [FAIL] 生成失败 - {clip.error}")
                 continue
 
             print(f"\n片段 {clip.index}: {clip.file_path}")

@@ -68,12 +68,12 @@ async function startTopicPipeline() {
     const data = await res.json();
     currentSession = data.session_id;
     logOffset = 0;
-    appendLog('topicLogs', `📋 Job ID: ${data.session_id}`, 'highlight');
+    appendLog('topicLogs', `Job ID: ${data.session_id}`, 'highlight');
     startPolling('topicLogs', 'topicRunStatus', 'topicResultPanel', 'topicResults', 'topic');
   } catch (e) {
     setRunStatus('topicRunStatus', 'error', '启动失败');
     document.getElementById('topicStartBtn').disabled = false;
-    appendLog('topicLogs', `❌ 启动失败: ${e.message}`, 'error');
+    appendLog('topicLogs', `[ERROR] 启动失败: ${e.message}`, 'error');
   }
 }
 
@@ -100,12 +100,12 @@ async function startNovelPipeline() {
     const data = await res.json();
     currentSession = data.session_id;
     logOffset = 0;
-    appendLog('novelLogs', `📋 Job ID: ${data.session_id}`, 'highlight');
+    appendLog('novelLogs', `Job ID: ${data.session_id}`, 'highlight');
     startPolling('novelLogs', 'novelRunStatus', 'novelResultPanel', 'novelResults', 'novel');
   } catch (e) {
     setRunStatus('novelRunStatus', 'error', '启动失败');
     document.getElementById('novelStartBtn').disabled = false;
-    appendLog('novelLogs', `❌ 启动失败: ${e.message}`, 'error');
+    appendLog('novelLogs', `[ERROR] 启动失败: ${e.message}`, 'error');
   }
 }
 
@@ -133,10 +133,10 @@ function startPolling(logContainerId, statusId, resultPanelId, resultBodyId, mod
         pollTimer = null;
 
         if (data.status === 'done') {
-          setRunStatus(statusId, 'done', '✅ 完成');
+          setRunStatus(statusId, 'done', '完成');
           await loadResult(resultPanelId, resultBodyId, mode);
         } else {
-          setRunStatus(statusId, 'error', '❌ 出错');
+          setRunStatus(statusId, 'error', '出错');
         }
 
         // 恢复按钮
@@ -188,10 +188,10 @@ function appendLog(containerId, text, cls = '') {
 
   // 自动颜色
   if (!cls) {
-    if (text.includes('✅')) cls = 'success';
-    else if (text.includes('❌') || text.includes('⚠️')) cls = 'error';
+    if (text.includes('[OK]') || text.includes('[PASS]')) cls = 'success';
+    else if (text.includes('[ERROR]') || text.includes('[FAIL]') || text.includes('[WARN]')) cls = 'error';
     else if (text.includes('Phase') || text.includes('====')) cls = 'phase';
-    else if (text.includes('📝') || text.includes('🎬') || text.includes('⚖️') || text.includes('📖')) cls = 'highlight';
+    else if (text.includes('[copywriter]') || text.includes('[cinematographer]') || text.includes('[judge]') || text.includes('[scene_analyzer]')) cls = 'highlight';
   }
   if (cls) div.classList.add(cls);
 
@@ -213,7 +213,7 @@ function renderResult(bodyId, result, mode) {
   const segments = result.segments || [];
 
   let html = `<div style="margin-bottom:12px; color:var(--text-secondary)">`;
-  html += `讨论轮数: ${result.rounds_used} | 通过: ${result.approved ? '✅' : '❌'}`;
+  html += `讨论轮数: ${result.rounds_used} | 通过: ${result.approved ? '[PASS]' : '[FAIL]'}`;
   if (result.prompts_json) html += ` | <span style="color:var(--text-muted)">JSON: ${result.prompts_json}</span>`;
   html += `</div>`;
 
@@ -244,16 +244,16 @@ function renderResult(bodyId, result, mode) {
     html += `<div style="margin-top:10px; text-align:right">`;
     html += `<button class="btn btn-secondary" style="font-size:12px; padding:4px 12px" `;
     html += `onclick='saveSegmentAsTemplate(${JSON.stringify(seg).replace(/'/g, "&#39;")}, "${mode}")'>`;
-    html += `💾 存为模板</button></div>`;
+    html += `存为模板</button></div>`;
 
     html += `</div>`;
   });
 
   // 视频生成结果
   if (result.clips) {
-    html += `<h3 style="margin-top:16px">🎬 视频生成结果</h3>`;
+    html += `<h3 style="margin-top:16px">视频生成结果</h3>`;
     result.clips.forEach(clip => {
-      const icon = clip.status === 'success' ? '✅' : '❌';
+      const icon = clip.status === 'success' ? '[OK]' : '[FAIL]';
       html += `<div class="field">${icon} 片段 ${clip.index}: ${clip.status}`;
       if (clip.file_path) html += ` — ${clip.file_path}`;
       if (clip.error) html += ` — <span style="color:var(--error)">${esc(clip.error)}</span>`;
@@ -264,13 +264,13 @@ function renderResult(bodyId, result, mode) {
   // 最终合成视频
   if (result.final_video) {
     html += `<div style="margin-top:16px; padding:12px; background:var(--bg-tertiary); border-radius:8px; border:1px solid var(--accent)">`;
-    html += `<h3 style="margin:0 0 8px 0">🎉 最终合成视频</h3>`;
+    html += `<h3 style="margin:0 0 8px 0">最终合成视频</h3>`;
     html += `<div class="field" style="word-break:break-all">${esc(result.final_video)}</div>`;
     html += `</div>`;
   }
   if (result.compose_error) {
     html += `<div style="margin-top:12px; padding:10px; background:rgba(255,0,0,0.1); border-radius:8px">`;
-    html += `<strong>⚠️ 视频合成失败:</strong> <span style="color:var(--error)">${esc(result.compose_error)}</span>`;
+    html += `<strong>视频合成失败:</strong> <span style="color:var(--error)">${esc(result.compose_error)}</span>`;
     html += `</div>`;
   }
 
@@ -311,11 +311,11 @@ async function loadTemplates() {
       <div class="template-card">
         <h4>「${esc(t.name)}」</h4>
         <div class="tags">${(t.tags||[]).map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>
-        ${t.description ? `<div class="desc">📝 ${esc(t.description)}</div>` : ''}
-        ${t.quality_score > 0 ? `<div class="score">⭐ ${t.quality_score}/10</div>` : ''}
+        ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ''}
+        ${t.quality_score > 0 ? `<div class="score">${t.quality_score}/10</div>` : ''}
         <div class="prompt-preview">${esc(t.positive_prompt || '')}</div>
         <div class="card-actions">
-          <button class="btn btn-danger" onclick="deleteTemplate('${esc(t.name)}')">🗑️ 删除</button>
+          <button class="btn btn-danger" onclick="deleteTemplate('${esc(t.name)}')"删除</button>
         </div>
       </div>
     `).join('');
@@ -420,7 +420,7 @@ async function saveSettings() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg),
     });
-    alert('✅ 设置已保存');
+    alert('设置已保存');
   } catch (e) {
     alert('保存失败: ' + e.message);
   }
@@ -450,32 +450,30 @@ async function loadJobs() {
     }
 
     container.innerHTML = jobs.map(job => {
-      const modeIcon = job.mode === 'novel' ? '📖' : '🎯';
       const modeLabel = job.mode === 'novel' ? '小说改编' : '主题创作';
       const statusMap = {
-        'created': '<span class="job-status created">⏳ 等待</span>',
-        'running': '<span class="job-status running">🔄 运行中</span>',
-        'done': '<span class="job-status done">✅ 完成</span>',
-        'error': '<span class="job-status error">❌ 失败</span>',
+        'created': '<span class="job-status created">等待</span>',
+        'running': '<span class="job-status running">运行中</span>',
+        'done': '<span class="job-status done">完成</span>',
+        'error': '<span class="job-status error">失败</span>',
       };
       const status = statusMap[job.status] || job.status;
       const time = new Date(job.created_at * 1000).toLocaleString('zh-CN');
       const duration = job.finished_at
         ? `${Math.round(job.finished_at - job.created_at)}s`
         : '—';
-      const videoTag = job.has_video ? '<span class="job-tag video-tag">🎬 有视频</span>' : '';
+      const videoTag = job.has_video ? '<span class="job-tag video-tag">有视频</span>' : '';
       const clipTag = job.clip_count > 0 ? `<span class="job-tag clip-tag">${job.clip_count} 片段</span>` : '';
 
       return `
         <div class="job-card" onclick="viewJobDetail('${job.id}')">
           <div class="job-card-left">
-            <div class="job-card-icon">${modeIcon}</div>
             <div class="job-card-info">
               <div class="job-card-title">${esc(job.title || '未命名任务')}</div>
               <div class="job-card-meta">
                 <span class="job-id-badge">${job.id}</span>
                 <span>${modeLabel}</span>
-                <span>⏱ ${time}</span>
+                <span>${time}</span>
                 <span>耗时 ${duration}</span>
               </div>
             </div>
@@ -510,13 +508,13 @@ async function viewJobDetail(jobId) {
     const job = await res.json();
 
     if (job.error && !job.result) {
-      document.getElementById('jobDetailTitle').textContent = '❌ 任务失败';
+      document.getElementById('jobDetailTitle').textContent = '任务失败';
       document.getElementById('jobDetailBody').innerHTML =
         `<div style="color:var(--error);padding:16px">${esc(job.error)}</div>`;
       return;
     }
 
-    const modeLabel = job.mode === 'novel' ? '📖 小说改编' : '🎯 主题创作';
+    const modeLabel = job.mode === 'novel' ? '小说改编' : '主题创作';
     document.getElementById('jobDetailTitle').textContent = `${modeLabel}`;
 
     let html = '';
@@ -529,7 +527,7 @@ async function viewJobDetail(jobId) {
     html += `<div class="job-overview-item"><strong>主题 / 文本:</strong> ${esc(job.title)}</div>`;
     html += `<div class="job-overview-item"><strong>时间:</strong> ${time}</div>`;
     html += `<div class="job-overview-item"><strong>耗时:</strong> ${duration}</div>`;
-    html += `<div class="job-overview-item"><strong>讨论轮数:</strong> ${result.rounds_used || '—'} | <strong>通过:</strong> ${result.approved ? '✅' : '❌'}</div>`;
+    html += `<div class="job-overview-item"><strong>讨论轮数:</strong> ${result.rounds_used || '—'} | <strong>通过:</strong> ${result.approved ? '[PASS]' : '[FAIL]'}</div>`;
     if (result.visual_style) {
       html += `<div class="job-overview-item"><strong>视觉风格:</strong> ${esc(result.visual_style)}</div>`;
     }
@@ -539,14 +537,14 @@ async function viewJobDetail(jobId) {
     if (result.final_video) {
       const videoUrl = `${API_BASE}/api/file?path=${encodeURIComponent(result.final_video)}`;
       html += `<div class="job-section job-final-video">`;
-      html += `<h3>🎉 最终合成视频</h3>`;
+      html += `<h3>最终合成视频</h3>`;
       html += `<video controls class="video-player" src="${videoUrl}" preload="metadata"></video>`;
       html += `<div class="job-file-path">${esc(result.final_video)}</div>`;
       html += `</div>`;
     }
     if (result.compose_error) {
       html += `<div class="job-section" style="border-color:var(--error)">`;
-      html += `<h3>⚠️ 视频合成失败</h3><p style="color:var(--error)">${esc(result.compose_error)}</p>`;
+      html += `<h3>视频合成失败</h3><p style="color:var(--error)">${esc(result.compose_error)}</p>`;
       html += `</div>`;
     }
 
@@ -554,14 +552,14 @@ async function viewJobDetail(jobId) {
     const segments = result.segments || [];
     const clips = result.clips || [];
     if (segments.length) {
-      html += `<div class="job-section"><h3>🎬 视频片段 & Prompt 详情</h3>`;
+      html += `<div class="job-section"><h3>视频片段 & Prompt 详情</h3>`;
       segments.forEach(seg => {
         const clip = clips.find(c => c.index === seg.index);
         html += `<div class="job-segment-card">`;
         html += `<div class="job-segment-header">`;
         html += `<h4>片段 ${seg.index}（${seg.time_range || ''}）</h4>`;
         if (clip) {
-          const icon = clip.status === 'success' ? '✅' : '❌';
+          const icon = clip.status === 'success' ? '[OK]' : '[FAIL]';
           html += `<span class="job-status ${clip.status === 'success' ? 'done' : 'error'}">${icon} ${clip.status}</span>`;
         }
         html += `</div>`;
@@ -610,15 +608,15 @@ async function viewJobDetail(jobId) {
     // ── 讨论日志（可折叠）
     if (job.logs && job.logs.length) {
       html += `<div class="job-section">`;
-      html += `<h3 class="collapsible" onclick="toggleCollapse(this)">📡 讨论日志 (${job.logs.length} 行) ▸</h3>`;
+      html += `<h3 class="collapsible" onclick="toggleCollapse(this)">讨论日志 (${job.logs.length} 行) ▸</h3>`;
       html += `<div class="collapsible-body collapsed">`;
       html += `<div class="log-body" style="max-height:500px">`;
       job.logs.forEach(line => {
         let cls = '';
-        if (line.includes('✅')) cls = 'success';
-        else if (line.includes('❌') || line.includes('⚠️')) cls = 'error';
+        if (line.includes('[OK]') || line.includes('[PASS]')) cls = 'success';
+        else if (line.includes('[ERROR]') || line.includes('[FAIL]') || line.includes('[WARN]')) cls = 'error';
         else if (line.includes('Phase') || line.includes('====')) cls = 'phase';
-        else if (line.includes('📝') || line.includes('🎬') || line.includes('⚖️') || line.includes('📖')) cls = 'highlight';
+        else if (line.includes('[copywriter]') || line.includes('[cinematographer]') || line.includes('[judge]') || line.includes('[scene_analyzer]')) cls = 'highlight';
         html += `<div class="log-line ${cls}">${esc(line)}</div>`;
       });
       html += `</div></div></div>`;
