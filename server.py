@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import PipelineConfig, LLMConfig, VideoConfig, ImageGenConfig
 from agents.discussion import DiscussionOrchestrator, DiscussionResult
 from agents.novel_discussion import NovelDiscussionOrchestrator, NovelPipelineResult
+from agents.prompt_optimizer import PromptOptimizerAgent
 from templates import TemplateStore
 
 
@@ -450,6 +451,7 @@ def _run_topic_pipeline(job_id: str, topic: str, discuss_only: bool) -> None:
                 {
                     "index": p.index,
                     "time_range": p.time_range,
+                    "duration_seconds": getattr(p, "duration_seconds", 5),
                     "copywriting": p.copywriting,
                     "scene_description": p.scene_description,
                     "camera_type": p.camera_type,
@@ -523,6 +525,7 @@ def _run_novel_pipeline(job_id: str, novel_text: str, discuss_only: bool) -> Non
                 {
                     "index": p.index,
                     "time_range": p.time_range,
+                    "duration_seconds": getattr(p, "duration_seconds", 5),
                     "narration": p.narration,
                     "scene_description": p.scene_description,
                     "camera_type": p.camera_type,
@@ -787,6 +790,26 @@ class APIHandler(BaseHTTPRequestHandler):
             body = self._read_body()
             _current_config.update(body)
             self._json_response({"status": "ok"})
+
+        elif path == "/api/prompt/optimize":
+            body = self._read_body()
+            text = body.get("text", "")
+            mode = body.get("mode", "t2v")  # "t2v" or "i2v"
+            if not text:
+                self._json_response({"error": "text is required"}, 400)
+                return
+            try:
+                config = _build_config()
+                optimizer = PromptOptimizerAgent(config.llm)
+                result = optimizer.optimize(text, mode=mode)
+                self._json_response({
+                    "original_text": result.original_text,
+                    "positive_prompt": result.positive_prompt,
+                    "negative_prompt": result.negative_prompt,
+                    "analysis": result.analysis,
+                })
+            except Exception as e:
+                self._json_response({"error": str(e)}, 500)
 
         elif path == "/api/templates":
             body = self._read_body()

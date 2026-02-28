@@ -213,7 +213,8 @@ function renderResult(bodyId, result, mode) {
   const segments = result.segments || [];
 
   let html = `<div style="margin-bottom:12px; color:var(--text-secondary)">`;
-  html += `讨论轮数: ${result.rounds_used} | 通过: ${result.approved ? '[PASS]' : '[FAIL]'}`;
+  const approvedLabel = result.approved === true ? '[PASS]' : result.approved === false ? '[FAIL]' : '—';
+  html += `讨论轮数: ${result.rounds_used} | 通过: ${approvedLabel}`;
   if (result.prompts_json) html += ` | <span style="color:var(--text-muted)">JSON: ${result.prompts_json}</span>`;
   html += `</div>`;
 
@@ -292,6 +293,71 @@ function saveSegmentAsTemplate(seg, mode) {
   document.getElementById('tplSource').value = seg.copywriting || seg.narration || '';
   document.getElementById('tplScore').value = 8;
   showModal('templateModal');
+}
+
+// ── Prompt Optimizer ────────────────────────────────────────
+
+function updateOptimizerCharCount() {
+  const len = document.getElementById('optimizerInput').value.length;
+  document.getElementById('optimizerCharCount').textContent = `${len} 字`;
+}
+
+async function runPromptOptimizer() {
+  const text = document.getElementById('optimizerInput').value.trim();
+  if (!text) { alert('请输入描述文字'); return; }
+
+  const mode = document.getElementById('optimizerMode').value;
+  const btn = document.getElementById('optimizerBtn');
+  const resultPanel = document.getElementById('optimizerResultPanel');
+
+  btn.disabled = true;
+  btn.textContent = '优化中...';
+  resultPanel.classList.add('hidden');
+
+  try {
+    const res = await fetch(`${API_BASE}/api/prompt/optimize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, mode }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      alert('优化失败: ' + data.error);
+      return;
+    }
+
+    document.getElementById('optimizerPositive').textContent = data.positive_prompt || '';
+    document.getElementById('optimizerNegative').textContent = data.negative_prompt || '';
+    document.getElementById('optimizerAnalysis').textContent = data.analysis || '';
+    resultPanel.classList.remove('hidden');
+
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '生成优化 Prompt';
+  }
+}
+
+function copyToClipboard(elementId) {
+  const text = document.getElementById(elementId).textContent;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    // 显示短暂提示
+    const el = document.getElementById(elementId);
+    const original = el.style.borderColor;
+    el.style.borderColor = 'var(--success)';
+    setTimeout(() => { el.style.borderColor = original; }, 800);
+  }).catch(() => {
+    // fallback
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  });
 }
 
 // ── Templates ───────────────────────────────────────────────
@@ -527,7 +593,8 @@ async function viewJobDetail(jobId) {
     html += `<div class="job-overview-item"><strong>主题 / 文本:</strong> ${esc(job.title)}</div>`;
     html += `<div class="job-overview-item"><strong>时间:</strong> ${time}</div>`;
     html += `<div class="job-overview-item"><strong>耗时:</strong> ${duration}</div>`;
-    html += `<div class="job-overview-item"><strong>讨论轮数:</strong> ${result.rounds_used || '—'} | <strong>通过:</strong> ${result.approved ? '[PASS]' : '[FAIL]'}</div>`;
+    const approvedText = result.approved === true ? '[PASS]' : result.approved === false ? '[FAIL]' : '—';
+    html += `<div class="job-overview-item"><strong>讨论轮数:</strong> ${result.rounds_used || '—'} | <strong>通过:</strong> ${approvedText}</div>`;
     if (result.visual_style) {
       html += `<div class="job-overview-item"><strong>视觉风格:</strong> ${esc(result.visual_style)}</div>`;
     }

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agents.base import BaseAgent, Message
+from agents.prompt_bestpractice import get_bestpractice_for_enrichment
 from config import LLMConfig
 
 if TYPE_CHECKING:
@@ -281,10 +282,12 @@ class JudgeAgent(BaseAgent):
 
         formatted_history = self.format_history(history)
 
-        enrichment_system = """You are an expert AI video generation prompt engineer. Your job is to take the approved discussion between a copywriter (文案师) and a cinematographer (镜头师) and produce the FINAL enriched prompts for an AI video generation model (Wan2.2).
+        enrichment_system = f"""You are an expert AI video generation prompt engineer. Your job is to take the approved discussion between a copywriter (文案师) and a cinematographer (镜头师) and produce the FINAL enriched prompts for an AI video generation model (Wan2.2).
+
+{get_bestpractice_for_enrichment()}
 
 For each video segment you must output:
-1. **positive_prompt**: A highly detailed, richly descriptive English prompt that combines the copywriter's intent with the cinematographer's visual design. Include: subject, action, composition, camera movement, lighting, color palette, atmosphere, style keywords, quality tags. Make it as detailed and specific as possible for best generation quality.
+1. **positive_prompt**: A highly detailed, richly descriptive English prompt that combines the copywriter's intent with the cinematographer's visual design. STRICTLY follow the Wan2.2 best practice formula: [aesthetic controls: lighting source + light quality + shot scale + composition + color tone + time of day] + [shot type] + [subject with detailed description] + [motion with intensity/speed] + [scene description] + [style keywords + quality tags]. Make it as detailed and specific as possible for best generation quality.
 2. **negative_prompt**: An English prompt specifying what to AVOID in that specific segment. Tailor it to each segment's content — for example, a nature scene should exclude people/text/UI elements; a person scene should exclude deformities. Always include universal quality negatives (low quality, blurry, etc.) plus segment-specific exclusions.
 
 Output ONLY a JSON array, no other text:
@@ -293,6 +296,7 @@ Output ONLY a JSON array, no other text:
   {
     "index": 1,
     "time_range": "0-5s",
+    "duration_seconds": 5,
     "copywriting": "original Chinese copywriting text",
     "scene_description": "Chinese scene description",
     "camera_type": "camera type",
@@ -305,6 +309,7 @@ Output ONLY a JSON array, no other text:
 Important rules:
 - positive_prompt must be in English, extremely detailed, production-ready
 - negative_prompt must be in English, tailored per segment
+- duration_seconds must be an integer 1–5, inferred from the segment's time range in the discussion (e.g. "0-3s" → 3, "5-10s" → 5). Frame count = 1 + 16 * duration_seconds
 - Maintain perfect style consistency across ALL segments' positive prompts (same style anchors, quality tags, aspect ratio, film grain, etc.)
 - Keep the creative vision from the discussion intact — do not deviate from the approved plan
 - Each positive_prompt should be self-contained (not reference other segments)"""
@@ -368,5 +373,6 @@ Now produce the final enriched prompts (positive + negative) for each video segm
                 camera_type=item.get("camera_type", ""),
                 video_prompt=item.get("positive_prompt", ""),
                 negative_prompt=item.get("negative_prompt", ""),
+                duration_seconds=max(1, min(5, int(item.get("duration_seconds", 5)))),
             ))
         return prompts

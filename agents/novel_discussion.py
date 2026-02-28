@@ -20,6 +20,7 @@ from agents.base import BaseAgent, Message
 from agents.scene_analyzer import SceneAnalyzerAgent
 from agents.novel_cinematographer import NovelCinematographerAgent
 from agents.judge import JudgeAgent
+from agents.prompt_bestpractice import get_bestpractice_for_enrichment
 from config import PipelineConfig, MIN_LLM_MAX_TOKENS
 
 
@@ -34,6 +35,7 @@ class NovelSegmentPrompt:
     image_prompt: str           # 英文参考图 prompt（用于 Qwen-Image 等）
     video_prompt: str           # 英文视频动作 prompt（用于 Wan2.2 I2V）
     negative_prompt: str = ""   # 英文反向 prompt
+    duration_seconds: int = 5   # 片段时长（秒），最多5秒；帧数 = 1 + 16 * duration_seconds
     ref_image_path: str = ""    # 生成后的参考图路径（后续填充）
 
 
@@ -119,7 +121,9 @@ class NovelJudgeAgent(JudgeAgent):
         """
         formatted_history = self.format_history(history)
 
-        enrichment_system = """You are an expert prompt engineer for AI image and video generation. Your job is to produce the FINAL production-ready prompts for a novel-to-video pipeline.
+        enrichment_system = f"""You are an expert prompt engineer for AI image and video generation. Your job is to produce the FINAL production-ready prompts for a novel-to-video pipeline.
+
+{get_bestpractice_for_enrichment()}
 
 The pipeline works as follows:
 1. A reference image is generated from `image_prompt` (using an image generation model like Qwen-Image)
@@ -127,8 +131,8 @@ The pipeline works as follows:
 3. The `narration` text will be used for voiceover/subtitles in post-production
 
 For each segment, output:
-1. **image_prompt**: Extremely detailed English prompt for generating the reference image (static frame). Must include: subject, composition, lighting, color palette, atmosphere, style keywords, quality tags. This image will become the first frame of the video.
-2. **video_prompt**: English prompt describing ONLY the motion and changes (camera movement, subject action, lighting shifts) that should happen over 5 seconds starting from the reference image. Do NOT repeat scene description — the I2V model already has the image.
+1. **image_prompt**: Extremely detailed English prompt for generating the reference image (static frame). STRICTLY follow the Wan2.2 best practice formula: [aesthetic controls: lighting source + light quality + shot scale + composition + color tone + time of day] + [shot type] + [subject with detailed description] + [scene description] + [style keywords + quality tags]. This image will become the first frame of the video.
+2. **video_prompt**: English prompt describing ONLY the motion and changes (camera movement, subject action, lighting shifts) that should happen over 5 seconds starting from the reference image. Follow the I2V formula: motion + camera movement. Specify motion intensity (gently/slowly/rapidly). Do NOT repeat scene description — the I2V model already has the image.
 3. **negative_prompt**: English prompt for elements to avoid (tailored per segment + universal quality negatives).
 4. **narration**: The original Chinese text suitable for voiceover for this segment.
 
@@ -138,6 +142,7 @@ Output ONLY a JSON array:
   {
     "index": 1,
     "time_range": "0-5s",
+    "duration_seconds": 5,
     "narration": "Chinese narration text from the novel",
     "scene_description": "Chinese scene description",
     "camera_type": "camera type",
@@ -152,7 +157,8 @@ Critical rules:
 - All image_prompts MUST share the same style anchor keywords for visual consistency
 - video_prompt should be concise — only motion, not scene description
 - narration preserves the original novel text
-- Each image_prompt must be self-contained (generates a complete image independently)"""
+- Each image_prompt must be self-contained (generates a complete image independently)
+- duration_seconds must be an integer 1–5, inferred from the segment's time range"""
 
         enrichment_user = f"""Novel text: "{novel_text}"
 
@@ -209,6 +215,7 @@ Produce the final enriched prompts as a JSON array."""
                 image_prompt=item.get("image_prompt", ""),
                 video_prompt=item.get("video_prompt", ""),
                 negative_prompt=item.get("negative_prompt", ""),
+                duration_seconds=max(1, min(5, int(item.get("duration_seconds", 5)))),
             ))
         return prompts
 

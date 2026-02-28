@@ -25,6 +25,7 @@ class VideoSegmentPrompt:
     camera_type: str       # 镜头类型
     video_prompt: str      # 用于 AI 生成的英文正向 Prompt
     negative_prompt: str = ""  # 英文反向 Prompt（裁判生成）
+    duration_seconds: int = 5  # 片段时长（秒），最多5秒；帧数 = 1 + 16 * duration_seconds
 
 
 @dataclass

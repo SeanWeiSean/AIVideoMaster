@@ -178,13 +178,15 @@ class VideoGenerator:
             if nid in wf and "text" in wf[nid].get("inputs", {}):
                 wf[nid]["inputs"]["text"] = self.config.negative_prompt
 
-        # 注入分辨率 & 帧数
+        # 注入分辨率 & 帧数（帧数 = 1 + 16 * duration_seconds，如 5s=81帧，4s=65帧，3s=49帧）
+        duration_sec = max(1, min(5, getattr(prompt, "duration_seconds", 5)))
+        frame_count = 1 + 16 * duration_sec
         for nid in p["latent_nodes"]:
             if nid in wf:
                 inputs = wf[nid]["inputs"]
                 inputs["width"] = self.config.width
                 inputs["height"] = self.config.height
-                inputs["length"] = self.config.length
+                inputs["length"] = frame_count
 
         # 注入种子
         for nid in p["seed_nodes"]:
@@ -228,8 +230,10 @@ class VideoGenerator:
         total = len(prompts)
 
         for i, prompt_seg in enumerate(prompts, 1):
+            duration = getattr(prompt_seg, 'duration_seconds', 5)
+            frames = 1 + 16 * duration
             print(f"\n{'─'*50}")
-            print(f"[INFO] 生成片段 {i}/{total}：{prompt_seg.time_range}")
+            print(f"[INFO] 生成片段 {i}/{total}：{prompt_seg.time_range}  时长={duration}s  帧数={frames}")
             print(f"   Prompt: {prompt_seg.video_prompt[:100]}...")
             print(f"{'─'*50}")
 

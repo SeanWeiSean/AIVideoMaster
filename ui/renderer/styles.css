@@ -880,3 +880,67 @@ select {
   max-height: 0 !important;
   padding: 0;
 }
+
+/* ── Prompt Optimizer ──────────────────────────────────────── */
+.optimizer-result-section {
+  margin-bottom: 20px;
+}
+.optimizer-result-section:last-child {
+  margin-bottom: 0;
+}
+
+.optimizer-result-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.optimizer-prompt-box {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: rgba(0,0,0,0.3);
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border-left: 4px solid var(--accent);
+  max-height: 200px;
+  overflow-y: auto;
+  word-break: break-word;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  transition: border-color 0.3s ease;
+}
+.optimizer-prompt-box.negative {
+  border-left-color: var(--error);
+}
+
+.optimizer-analysis-box {
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: rgba(0,0,0,0.2);
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border-left: 4px solid var(--warning);
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.btn-copy {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-family: inherit;
+}
+.btn-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}

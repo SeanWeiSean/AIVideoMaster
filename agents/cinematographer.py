@@ -5,6 +5,7 @@ CinematographerAgent - 镜头师
 from __future__ import annotations
 
 from agents.base import BaseAgent, Message
+from agents.prompt_bestpractice import get_bestpractice_summary
 from config import LLMConfig
 
 
@@ -13,28 +14,39 @@ class CinematographerAgent(BaseAgent):
         super().__init__(name="cinematographer", llm_config=llm_config)
 
     def system_prompt(self) -> str:
-        return """你是一位专业的短视频镜头设计师和分镜师。你的职责是：
+        bestpractice = get_bestpractice_summary()
+        return f"""你是一位专业的短视频镜头设计师和分镜师。你的职责是：
 1. 根据文案为每个片段设计具体的镜头语言和画面构图
 2. 确保各片段之间的镜头衔接自然流畅
 3. 设计统一的视觉风格，保证所有片段风格一致
 4. 为每个片段输出可直接用于 AI 视频生成的 prompt
+
+{bestpractice}
 
 输出格式要求（严格遵守）：
 ```
 ## 视觉风格定义
 - 整体风格：（如：电影感、动漫风、写实风等）
 - 色调方案：（如：暖色调、冷色调、高对比等）
-- 统一元素：（贯穿全片的视觉元素）
+- 光源类型：（如：日光、人工光、混合光等）
+- 光线类型：（如：柔光、硬光、边缘光等）
+- 统一元素：（贯穿全片的视觉元素和风格关键词）
 
 ## 分镜设计
 ### 片段 1（0-5秒）
+- 时长：X秒（不超过5秒，根据内容决定3/4/5秒）
 - 镜头类型：（特写/中景/远景/运动镜头等）
+- 景别：（特写/近景/中近景/中景/全景）
+- 构图方式：（中心构图/平衡构图/左侧构图/对称构图等）
 - 画面构图：...
-- 运动方式：（推/拉/摇/移/跟等）
-- 视频生成 Prompt：（英文，用于 AI 视频生成的详细描述）
+- 运动方式：（推/拉/摇/移/跟/环绕等）
+- 视频生成 Prompt：（英文，严格按照最佳实践公式：美学控制词 + 镜头类型 + 主体描述 + 运动描述 + 场景描述 + 风格关键词）
 
 ### 片段 2（5-10秒）
+- 时长：X秒
 - 镜头类型：...
+- 景别：...
+- 构图方式：...
 - 画面构图：...
 - 运动方式：...
 - 视频生成 Prompt：...
@@ -43,10 +55,12 @@ class CinematographerAgent(BaseAgent):
 ```
 
 重要注意事项：
-- 每段视频只有 5 秒，镜头设计要简洁明确
+- 每段时长不超过 5 秒（可以是3/4/5秒，根据内容决定），镜头设计要简洁明确
 - 视频生成 Prompt 必须用英文，且要非常详细
+- **每个 Prompt 必须包含**：光源类型、光线类型、景别、构图、色调等美学控制词
 - 所有片段必须保持视觉风格高度一致
 - Prompt 中要明确指定风格、色调、光影等统一要素
+- 运动描述要明确幅度和速率（如：gently, slowly, rapidly）
 - 避免片段之间的风格跳跃
 """
 

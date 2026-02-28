@@ -21,6 +21,9 @@
       <li class="nav-item" data-page="novel">
         <span class="nav-label">小说改编</span>
       </li>
+      <li class="nav-item" data-page="optimizer">
+        <span class="nav-label">Prompt 优化</span>
+      </li>
       <li class="nav-item" data-page="templates">
         <span class="nav-label">模板管理</span>
       </li>
@@ -138,6 +141,72 @@
       <div class="result-panel hidden" id="novelResultPanel">
         <div class="result-header"><h3>改编结果</h3></div>
         <div class="result-body" id="novelResults"></div>
+      </div>
+    </section>
+
+    <!-- ========== Prompt 优化页 ========== -->
+    <section class="page" id="page-optimizer">
+      <div class="page-header">
+        <h2>Prompt 优化</h2>
+        <p class="subtitle">输入任意描述文字，根据 Wan2.2 最佳实践生成专业 Prompt</p>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label>生成模式</label>
+          <select id="optimizerMode">
+            <option value="t2v">文生视频 (T2V) — 完整 Prompt</option>
+            <option value="i2v">图生视频 (I2V) — 运动 + 运镜</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>描述文字 <span class="char-count" id="optimizerCharCount">0 字</span></label>
+        <textarea id="optimizerInput" rows="5"
+          placeholder="例：一位穿着红裙的女孩在樱花树下旋转跳舞，花瓣纷飞，夕阳余晖..."
+          oninput="updateOptimizerCharCount()"></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="btn-group">
+          <button class="btn btn-primary" id="optimizerBtn" onclick="runPromptOptimizer()">
+            生成优化 Prompt
+          </button>
+        </div>
+      </div>
+
+      <!-- 优化结果 -->
+      <div class="result-panel hidden" id="optimizerResultPanel">
+        <div class="result-header">
+          <h3>优化结果</h3>
+        </div>
+        <div class="result-body" id="optimizerResults">
+
+          <div class="optimizer-result-section">
+            <div class="optimizer-result-label">
+              <strong>Positive Prompt</strong>
+              <button class="btn-copy" onclick="copyToClipboard('optimizerPositive')" title="复制">📋 复制</button>
+            </div>
+            <div class="optimizer-prompt-box" id="optimizerPositive"></div>
+          </div>
+
+          <div class="optimizer-result-section">
+            <div class="optimizer-result-label">
+              <strong>Negative Prompt</strong>
+              <button class="btn-copy" onclick="copyToClipboard('optimizerNegative')" title="复制">📋 复制</button>
+            </div>
+            <div class="optimizer-prompt-box negative" id="optimizerNegative"></div>
+          </div>
+
+          <div class="optimizer-result-section">
+            <div class="optimizer-result-label">
+              <strong>优化分析</strong>
+            </div>
+            <div class="optimizer-analysis-box" id="optimizerAnalysis"></div>
+          </div>
+
+        </div>
       </div>
     </section>
 
