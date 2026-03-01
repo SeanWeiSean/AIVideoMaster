@@ -25,13 +25,26 @@ async function checkServer() {
   try {
     const res = await fetch(`${API_BASE}/api/health`);
     if (res.ok) {
+      const data = await res.json();
+      // 服务器状态
       document.getElementById('serverStatus').className = 'status-dot connected';
-      document.getElementById('serverStatusText').textContent = '已连接';
+      document.getElementById('serverStatusText').textContent = '服务器: 已连接';
+      // ComfyUI 状态
+      if (data.comfyui_connected) {
+        document.getElementById('comfyuiStatus').className = 'status-dot connected';
+        document.getElementById('comfyuiStatusText').textContent = 'ComfyUI: 已连接';
+      } else {
+        document.getElementById('comfyuiStatus').className = 'status-dot error';
+        document.getElementById('comfyuiStatusText').textContent = 'ComfyUI: 未连接';
+      }
       return true;
     }
   } catch (e) {}
+  // 服务器不可达 → 两个都标红
   document.getElementById('serverStatus').className = 'status-dot error';
-  document.getElementById('serverStatusText').textContent = '未连接';
+  document.getElementById('serverStatusText').textContent = '服务器: 未连接';
+  document.getElementById('comfyuiStatus').className = 'status-dot error';
+  document.getElementById('comfyuiStatusText').textContent = 'ComfyUI: 未知';
   return false;
 }
 
@@ -302,6 +315,198 @@ function updateOptimizerCharCount() {
   document.getElementById('optimizerCharCount').textContent = `${len} 字`;
 }
 
+// ── Image Tools ─────────────────────────────────────────────
+
+let imgSession = null;
+let imgPollTimer = null;
+let imgLogOffset = 0;
+let imageBase64 = { create: '', edit: '' };
+let lastResultImagePath = '';
+
+function switchImageTab(tab) {
+  document.querySelectorAll('.img-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.img-tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.img-tab[data-tab="${tab}"]`).classList.add('active');
+  document.getElementById(`panel-${tab}`).classList.add('active');
+}
+
+function handleImageUpload(event, mode) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const dataUrl = e.target.result;
+    imageBase64[mode] = dataUrl.split(',')[1] || '';
+    document.getElementById(`${mode}PreviewImg`).src = dataUrl;
+    document.getElementById(`${mode}PreviewImg`).classList.remove('hidden');
+    document.getElementById(`${mode}Placeholder`).classList.add('hidden');
+  };
+  reader.readAsDataURL(file);
+}
+
+// 拖拽上传支持（两个面板都支持）
+document.addEventListener('DOMContentLoaded', () => {
+  ['create', 'edit'].forEach(mode => {
+    const uploadArea = document.getElementById(`${mode}UploadArea`);
+    if (!uploadArea) return;
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('drag-over');
+    });
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('drag-over');
+    });
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        handleImageUpload({ target: { files: [file] } }, mode);
+      }
+    });
+  });
+});
+
+async function startImageTask(mode) {
+  const positive = document.getElementById(`${mode}Positive`).value.trim();
+  if (!positive) { alert('请输入 Prompt'); return; }
+  if (!imageBase64[mode]) { alert('请上传图片'); return; }
+
+  const negative = document.getElementById(`${mode}Negative`).value.trim();
+  const steps = parseInt(document.getElementById(`${mode}Steps`).value) || 4;
+  const denoise = parseFloat(document.getElementById(`${mode}Denoise`).value);
+  const seedVal = document.getElementById(`${mode}Seed`).value.trim();
+  const seed = seedVal ? parseInt(seedVal) : null;
+
+  const btn = document.getElementById(`${mode}StartBtn`);
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '生成中...';
+  document.getElementById('imgResultPanel').classList.add('hidden');
+  document.getElementById('imgLogPanel').style.display = '';
+  clearLogs('imgLogs');
+  setRunStatus('imgRunStatus', 'running', '生成中...');
+
+  try {
+    const res = await fetch(`${API_BASE}/api/image/${mode}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        positive_prompt: positive,
+        negative_prompt: negative,
+        input_image: imageBase64[mode],
+        steps, denoise, seed,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) { throw new Error(data.error); }
+
+    imgSession = data.job_id;
+    imgLogOffset = 0;
+    appendLog('imgLogs', `Job ID: ${data.job_id}`, 'highlight');
+    startImagePolling(mode, origText);
+  } catch (e) {
+    setRunStatus('imgRunStatus', 'error', '启动失败');
+    appendLog('imgLogs', `[ERROR] ${e.message}`, 'error');
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+function startImagePolling(mode, origBtnText) {
+  imgPollTimer = setInterval(async () => {
+    if (!imgSession) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/session-logs/${imgSession}?after=${imgLogOffset}`);
+      const data = await res.json();
+
+      if (data.logs && data.logs.length > 0) {
+        data.logs.forEach(line => appendLog('imgLogs', line));
+        imgLogOffset = data.total;
+      }
+
+      if (data.status === 'done' || data.status === 'error') {
+        clearInterval(imgPollTimer);
+        imgPollTimer = null;
+
+        if (data.status === 'done') {
+          setRunStatus('imgRunStatus', 'done', '完成');
+          await showImageResult();
+        } else {
+          setRunStatus('imgRunStatus', 'error', '出错');
+        }
+
+        // 恢复按钮
+        const btn = document.getElementById(`${mode}StartBtn`);
+        if (btn) { btn.disabled = false; btn.textContent = origBtnText; }
+      }
+    } catch (e) { /* retry */ }
+  }, 1000);
+}
+
+async function showImageResult() {
+  if (!imgSession) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/session/${imgSession}`);
+    const data = await res.json();
+    const result = data.result;
+    if (!result) return;
+
+    if (result.status === 'success' && result.file_path) {
+      lastResultImagePath = result.file_path;
+      const imgUrl = `${API_BASE}/api/file?path=${encodeURIComponent(result.file_path)}`;
+      document.getElementById('imgResultImage').src = imgUrl;
+
+      const modeLabel = result.mode === 'edit' ? '图片编辑' : '图片创建';
+      document.getElementById('imgResultInfo').textContent = `模式: ${modeLabel}`;
+
+      document.getElementById('imgResultPanel').classList.remove('hidden');
+    } else if (result.error) {
+      appendLog('imgLogs', `[FAIL] ${result.error}`, 'error');
+    }
+  } catch (e) {}
+}
+
+function downloadResultImage() {
+  const img = document.getElementById('imgResultImage');
+  if (!img.src) return;
+  const a = document.createElement('a');
+  a.href = img.src;
+  a.download = lastResultImagePath.split('/').pop() || 'generated.png';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function copyResultImagePath() {
+  if (!lastResultImagePath) return;
+  navigator.clipboard.writeText(lastResultImagePath).catch(() => {});
+  const info = document.getElementById('imgResultInfo');
+  const orig = info.textContent;
+  info.textContent = '✅ 路径已复制';
+  setTimeout(() => { info.textContent = orig; }, 1500);
+}
+
+function useAsEditInput() {
+  const img = document.getElementById('imgResultImage');
+  if (!img.src) return;
+
+  // 切换到 Edit tab
+  switchImageTab('edit');
+
+  // 将结果图转为 base64 设置为 Edit 输入
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const dataUrl = canvas.toDataURL('image/png');
+  imageBase64['edit'] = dataUrl.split(',')[1] || '';
+  document.getElementById('editPreviewImg').src = dataUrl;
+  document.getElementById('editPreviewImg').classList.remove('hidden');
+  document.getElementById('editPlaceholder').classList.add('hidden');
+}
+
 async function runPromptOptimizer() {
   const text = document.getElementById('optimizerInput').value.trim();
   if (!text) { alert('请输入描述文字'); return; }
@@ -358,6 +563,235 @@ function copyToClipboard(elementId) {
     document.execCommand('copy');
     document.body.removeChild(ta);
   });
+}
+
+// ── I2V Video Generation ────────────────────────────────────
+
+let i2vSession = null;
+let i2vPollTimer = null;
+let i2vLogOffset = 0;
+let i2vImageBase64 = '';
+let lastI2VResultPath = '';
+
+// ── I2V 模型切换 ──
+function onI2VModelChange() {
+  const model = document.getElementById('i2vModel').value;
+  const wanParams = document.getElementById('i2vWanParams');
+  const ltxParams = document.getElementById('i2vLtxParams');
+  const lengthSel = document.getElementById('i2vLength');
+  const widthInput = document.getElementById('i2vWidth');
+  const heightInput = document.getElementById('i2vHeight');
+
+  if (model === 'ltx2') {
+    wanParams.style.display = 'none';
+    ltxParams.style.display = '';
+    // LTX 默认参数
+    widthInput.value = 1280;
+    heightInput.value = 720;
+    // 更新帧数选项 (25fps)
+    lengthSel.innerHTML = `
+      <option value="121">121帧 (~4.8秒)</option>
+      <option value="161">161帧 (~6.4秒)</option>
+      <option value="201">201帧 (~8秒)</option>
+      <option value="241" selected>241帧 (~9.6秒)</option>
+    `;
+  } else {
+    wanParams.style.display = '';
+    ltxParams.style.display = 'none';
+    // Wan2.2 默认参数
+    widthInput.value = 1088;
+    heightInput.value = 720;
+    // 恢复帧数选项 (16fps)
+    lengthSel.innerHTML = `
+      <option value="49">49帧 (~3秒)</option>
+      <option value="65">65帧 (~4秒)</option>
+      <option value="81" selected>81帧 (~5秒)</option>
+    `;
+  }
+}
+
+function handleI2VImageUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const dataUrl = e.target.result;
+    i2vImageBase64 = dataUrl.split(',')[1] || '';
+    document.getElementById('i2vPreviewImg').src = dataUrl;
+    document.getElementById('i2vPreviewImg').classList.remove('hidden');
+    document.getElementById('i2vPlaceholder').classList.add('hidden');
+  };
+  reader.readAsDataURL(file);
+}
+
+// 拖拽上传
+document.addEventListener('DOMContentLoaded', () => {
+  const uploadArea = document.getElementById('i2vUploadArea');
+  if (uploadArea) {
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('drag-over');
+    });
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('drag-over');
+    });
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        handleI2VImageUpload({ target: { files: [file] } });
+      }
+    });
+  }
+});
+
+async function startI2V() {
+  const positive = document.getElementById('i2vPositive').value.trim();
+  if (!positive) { alert('请输入动作描述 Prompt'); return; }
+  if (!i2vImageBase64) { alert('请上传参考图片'); return; }
+
+  const model = document.getElementById('i2vModel').value;
+  const negative = document.getElementById('i2vNegative').value.trim();
+  const width = parseInt(document.getElementById('i2vWidth').value) || (model === 'ltx2' ? 1280 : 1088);
+  const height = parseInt(document.getElementById('i2vHeight').value) || 720;
+  const length = parseInt(document.getElementById('i2vLength').value) || (model === 'ltx2' ? 241 : 81);
+
+  const btn = document.getElementById('i2vStartBtn');
+  btn.disabled = true;
+  btn.textContent = '生成中...';
+  document.getElementById('i2vResultPanel').classList.add('hidden');
+  document.getElementById('i2vLogPanel').style.display = '';
+  clearLogs('i2vLogs');
+  setRunStatus('i2vRunStatus', 'running', '生成中...');
+
+  try {
+    let apiPath, bodyData;
+
+    if (model === 'ltx2') {
+      // LTX-2.0 I2V
+      const steps = parseInt(document.getElementById('i2vLtxSteps').value) || 20;
+      const cfg_pass1 = parseFloat(document.getElementById('i2vLtxCfg1').value) || 4.0;
+      const cfg_pass2 = parseFloat(document.getElementById('i2vLtxCfg2').value) || 1.0;
+      const seedVal = document.getElementById('i2vLtxSeed').value.trim();
+      const seed = seedVal ? parseInt(seedVal) : null;
+      apiPath = '/api/video/ltx-i2v';
+      bodyData = {
+        positive_prompt: positive,
+        negative_prompt: negative,
+        input_image: i2vImageBase64,
+        width, height, length,
+        steps, cfg_pass1, cfg_pass2, seed,
+      };
+    } else {
+      // Wan2.2 I2V
+      const quality = document.getElementById('i2vQuality').value;
+      const use_fast_lora = quality === 'fast';
+      const seedVal = document.getElementById('i2vSeed').value.trim();
+      const seed = seedVal ? parseInt(seedVal) : null;
+      apiPath = '/api/video/i2v';
+      bodyData = {
+        positive_prompt: positive,
+        negative_prompt: negative,
+        input_image: i2vImageBase64,
+        width, height, length,
+        use_fast_lora, seed,
+      };
+    }
+
+    const res = await fetch(`${API_BASE}${apiPath}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyData),
+    });
+    const data = await res.json();
+    if (data.error) { throw new Error(data.error); }
+
+    i2vSession = data.job_id;
+    i2vLogOffset = 0;
+    appendLog('i2vLogs', `Job ID: ${data.job_id}`, 'highlight');
+    startI2VPolling();
+  } catch (e) {
+    setRunStatus('i2vRunStatus', 'error', '启动失败');
+    appendLog('i2vLogs', `[ERROR] ${e.message}`, 'error');
+    btn.disabled = false;
+    btn.textContent = '🎬 开始生成';
+  }
+}
+
+function startI2VPolling() {
+  i2vPollTimer = setInterval(async () => {
+    if (!i2vSession) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/session-logs/${i2vSession}?after=${i2vLogOffset}`);
+      const data = await res.json();
+
+      if (data.logs && data.logs.length > 0) {
+        data.logs.forEach(line => appendLog('i2vLogs', line));
+        i2vLogOffset = data.total;
+      }
+
+      if (data.status === 'done' || data.status === 'error') {
+        clearInterval(i2vPollTimer);
+        i2vPollTimer = null;
+
+        if (data.status === 'done') {
+          setRunStatus('i2vRunStatus', 'done', '完成');
+          await showI2VResult();
+        } else {
+          setRunStatus('i2vRunStatus', 'error', '出错');
+        }
+
+        const btn = document.getElementById('i2vStartBtn');
+        btn.disabled = false;
+        btn.textContent = '🎬 开始生成';
+      }
+    } catch (e) { /* retry */ }
+  }, 1500);
+}
+
+async function showI2VResult() {
+  if (!i2vSession) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/session/${i2vSession}`);
+    const data = await res.json();
+    const result = data.result;
+    if (!result) return;
+
+    if (result.status === 'success' && result.file_path) {
+      lastI2VResultPath = result.file_path;
+      const videoUrl = `${API_BASE}/api/file?path=${encodeURIComponent(result.file_path)}`;
+      document.getElementById('i2vResultVideo').src = videoUrl;
+
+      const modeLabel = result.use_fast_lora ? '4步快速' : '20步标准';
+      document.getElementById('i2vResultInfo').textContent =
+        `模式: ${modeLabel} | 尺寸: ${result.width}×${result.height} | 帧数: ${result.length}`;
+
+      document.getElementById('i2vResultPanel').classList.remove('hidden');
+    } else if (result.error) {
+      appendLog('i2vLogs', `[FAIL] ${result.error}`, 'error');
+    }
+  } catch (e) {}
+}
+
+function downloadI2VResult() {
+  const video = document.getElementById('i2vResultVideo');
+  if (!video.src) return;
+  const a = document.createElement('a');
+  a.href = video.src;
+  a.download = lastI2VResultPath.split('/').pop() || 'i2v_output.mp4';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function copyI2VResultPath() {
+  if (!lastI2VResultPath) return;
+  navigator.clipboard.writeText(lastI2VResultPath).catch(() => {});
+  const info = document.getElementById('i2vResultInfo');
+  const orig = info.textContent;
+  info.textContent = '✅ 路径已复制';
+  setTimeout(() => { info.textContent = orig; }, 1500);
 }
 
 // ── Templates ───────────────────────────────────────────────

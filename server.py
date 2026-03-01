@@ -36,6 +36,9 @@ from config import PipelineConfig, LLMConfig, VideoConfig, ImageGenConfig
 from agents.discussion import DiscussionOrchestrator, DiscussionResult
 from agents.novel_discussion import NovelDiscussionOrchestrator, NovelPipelineResult
 from agents.prompt_optimizer import PromptOptimizerAgent
+from video.comfyui_image import ComfyUIImageClient, ImageJob
+from video.i2v_generator import I2VGenerator, I2VJob
+from video.ltx_i2v_generator import LtxI2VGenerator, LtxI2VJob
 from templates import TemplateStore
 
 
@@ -507,7 +510,7 @@ def _run_novel_pipeline(job_id: str, novel_text: str, discuss_only: bool) -> Non
         jobs.set_status(job_id, "running")
         config = _build_config()
         orchestrator = NovelDiscussionOrchestrator(config)
-        result = orchestrator.run(novel_text)
+        result: NovelPipelineResult = orchestrator.run(novel_text)
 
         # 保存到 Job 目录
         job_dir = str(jobs._job_dir(job_id))
@@ -563,6 +566,200 @@ def _run_novel_pipeline(job_id: str, novel_text: str, discuss_only: bool) -> Non
 
         jobs.set_result(job_id, result_data)
         jobs.set_status(job_id, "done")
+
+    except Exception as e:
+        jobs.set_error(job_id, str(e))
+    finally:
+        sys.stdout = old_stdout
+
+
+# ── 图片生成线程 ──────────────────────────────────────────────
+
+def _run_image_task(job_id: str, mode: str, positive_prompt: str,
+                    negative_prompt: str, input_image_b64: str,
+                    seed: int | None, steps: int | None,
+                    denoise: float | None) -> None:
+    """在后台线程运行图片创建/编辑任务"""
+    capture = LogCapture(job_id, sys.stdout)
+    old_stdout = sys.stdout
+    sys.stdout = capture
+
+    try:
+        jobs.set_status(job_id, "running")
+        comfyui_url = _current_config.get("comfyui_url", "http://localhost:8188")
+        output_dir = _current_config.get("output_dir", "./output")
+        client = ComfyUIImageClient(comfyui_url, output_dir)
+
+        if not client.check_connection():
+            raise ConnectionError(f"无法连接 ComfyUI: {comfyui_url}")
+
+        mode_label = "图片创建" if mode == "create" else "图片编辑"
+        print(f"[{mode.upper()}] {mode_label}")
+        print(f"[{mode.upper()}] 正向提示: {positive_prompt[:100]}")
+        print(f"[{mode.upper()}] 输入图片: {len(input_image_b64) / 1024:.0f} KB (base64)")
+
+        if mode == "create":
+            result = client.image_create(
+                positive_prompt=positive_prompt,
+                input_image_b64=input_image_b64,
+                negative_prompt=negative_prompt,
+                seed=seed, steps=steps, denoise=denoise,
+                output_name=f"create_{job_id}.png",
+            )
+        else:
+            result = client.image_edit(
+                positive_prompt=positive_prompt,
+                input_image_b64=input_image_b64,
+                negative_prompt=negative_prompt,
+                seed=seed, steps=steps, denoise=denoise,
+                output_name=f"edit_{job_id}.png",
+            )
+
+        result_data = {
+            "mode": mode,
+            "status": result.status,
+            "file_path": result.file_path,
+            "error": result.error,
+            "prompt": positive_prompt,
+            "negative_prompt": negative_prompt,
+        }
+        jobs.set_result(job_id, result_data)
+        jobs.set_status(job_id, "done" if result.status == "success" else "error")
+
+        if result.status == "success":
+            print(f"[OK] {mode_label}完成: {result.file_path}")
+        else:
+            print(f"[FAIL] {mode_label}失败: {result.error}")
+
+    except Exception as e:
+        jobs.set_error(job_id, str(e))
+    finally:
+        sys.stdout = old_stdout
+
+
+# ── I2V 视频生成线程 ─────────────────────────────────────────
+
+def _run_i2v_task(job_id: str, positive_prompt: str, negative_prompt: str,
+                  input_image_b64: str, width: int, height: int,
+                  length: int, seed: int | None, use_fast_lora: bool) -> None:
+    """在后台线程运行 I2V 图生视频任务"""
+    capture = LogCapture(job_id, sys.stdout)
+    old_stdout = sys.stdout
+    sys.stdout = capture
+
+    try:
+        jobs.set_status(job_id, "running")
+        comfyui_url = _current_config.get("comfyui_url", "http://localhost:8188")
+        output_dir = _current_config.get("output_dir", "./output")
+        generator = I2VGenerator(comfyui_url, output_dir)
+
+        if not generator.check_connection():
+            raise ConnectionError(f"无法连接 ComfyUI: {comfyui_url}")
+
+        mode_label = "4步快速" if use_fast_lora else "20步标准"
+        print(f"[I2V] 图生视频 ({mode_label})")
+        print(f"[I2V] 正向提示: {positive_prompt[:100]}")
+        print(f"[I2V] 输入图片: {len(input_image_b64) / 1024:.0f} KB (base64)")
+        print(f"[I2V] 参数: {width}x{height}, {length}帧")
+
+        result = generator.generate(
+            positive_prompt=positive_prompt,
+            input_image_b64=input_image_b64,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            length=length,
+            seed=seed,
+            use_fast_lora=use_fast_lora,
+            output_name=f"i2v_{job_id}.mp4",
+        )
+
+        result_data = {
+            "mode": "i2v",
+            "status": result.status,
+            "file_path": result.file_path,
+            "error": result.error,
+            "prompt": positive_prompt,
+            "negative_prompt": negative_prompt,
+            "width": width,
+            "height": height,
+            "length": length,
+            "use_fast_lora": use_fast_lora,
+        }
+        jobs.set_result(job_id, result_data)
+        jobs.set_status(job_id, "done" if result.status == "success" else "error")
+
+        if result.status == "success":
+            print(f"[OK] I2V 视频完成: {result.file_path}")
+        else:
+            print(f"[FAIL] I2V 视频失败: {result.error}")
+
+    except Exception as e:
+        jobs.set_error(job_id, str(e))
+    finally:
+        sys.stdout = old_stdout
+
+
+# ── LTX I2V 视频生成线程 ─────────────────────────────────────
+
+def _run_ltx_i2v_task(job_id: str, positive_prompt: str, negative_prompt: str,
+                      input_image_b64: str, width: int, height: int,
+                      length: int, seed: int | None,
+                      steps: int, cfg_pass1: float, cfg_pass2: float) -> None:
+    """在后台线程运行 LTX-2.0 I2V 图生视频任务"""
+    capture = LogCapture(job_id, sys.stdout)
+    old_stdout = sys.stdout
+    sys.stdout = capture
+
+    try:
+        jobs.set_status(job_id, "running")
+        comfyui_url = _current_config.get("comfyui_url", "http://localhost:8188")
+        output_dir = _current_config.get("output_dir", "./output")
+        generator = LtxI2VGenerator(comfyui_url, output_dir)
+
+        if not generator.check_connection():
+            raise ConnectionError(f"无法连接 ComfyUI: {comfyui_url}")
+
+        print(f"[LTX-I2V] 图生视频 (LTX-2.0)")
+        print(f"[LTX-I2V] 正向提示: {positive_prompt[:100]}")
+        print(f"[LTX-I2V] 输入图片: {len(input_image_b64) / 1024:.0f} KB (base64)")
+        print(f"[LTX-I2V] 参数: {width}x{height}, {length}帧, {steps}步, CFG={cfg_pass1}/{cfg_pass2}")
+
+        result = generator.generate(
+            positive_prompt=positive_prompt,
+            input_image_b64=input_image_b64,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            length=length,
+            seed=seed,
+            steps=steps,
+            cfg_pass1=cfg_pass1,
+            cfg_pass2=cfg_pass2,
+            output_name=f"ltx_i2v_{job_id}.mp4",
+        )
+
+        result_data = {
+            "mode": "ltx-i2v",
+            "status": result.status,
+            "file_path": result.file_path,
+            "error": result.error,
+            "prompt": positive_prompt,
+            "negative_prompt": negative_prompt,
+            "width": width,
+            "height": height,
+            "length": length,
+            "steps": steps,
+            "cfg_pass1": cfg_pass1,
+            "cfg_pass2": cfg_pass2,
+        }
+        jobs.set_result(job_id, result_data)
+        jobs.set_status(job_id, "done" if result.status == "success" else "error")
+
+        if result.status == "success":
+            print(f"[OK] LTX I2V 视频完成: {result.file_path}")
+        else:
+            print(f"[FAIL] LTX I2V 视频失败: {result.error}")
 
     except Exception as e:
         jobs.set_error(job_id, str(e))
@@ -740,7 +937,20 @@ class APIHandler(BaseHTTPRequestHandler):
             self._serve_output_file(file_path)
 
         elif path == "/api/health":
-            self._json_response({"status": "ok", "time": datetime.now().isoformat()})
+            # 检测 ComfyUI 连接
+            comfyui_ok = False
+            comfyui_url = _current_config.get("comfyui_url", "http://localhost:8188")
+            try:
+                from video.generator import ComfyUIClient
+                comfyui_ok = ComfyUIClient(comfyui_url).is_alive()
+            except Exception:
+                pass
+            self._json_response({
+                "status": "ok",
+                "time": datetime.now().isoformat(),
+                "comfyui_connected": comfyui_ok,
+                "comfyui_url": comfyui_url,
+            })
 
         # ── 静态文件 ──
         elif path == "/" or path == "/index.html":
@@ -794,7 +1004,7 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path == "/api/prompt/optimize":
             body = self._read_body()
             text = body.get("text", "")
-            mode = body.get("mode", "t2v")  # "t2v" or "i2v"
+            mode = body.get("mode", "t2v")  # "t2v" | "i2v" | "ltx-i2v"
             if not text:
                 self._json_response({"error": "text is required"}, 400)
                 return
@@ -824,6 +1034,100 @@ class APIHandler(BaseHTTPRequestHandler):
                 quality_score=body.get("quality_score", 0.0),
             )
             self._json_response({"status": "ok"})
+
+        elif path in ("/api/image/create", "/api/image/edit"):
+            body = self._read_body()
+            mode = "create" if path.endswith("/create") else "edit"
+            positive_prompt = body.get("positive_prompt", "")
+            input_image = body.get("input_image", "")
+            if not positive_prompt:
+                self._json_response({"error": "positive_prompt is required"}, 400)
+                return
+            if not input_image:
+                self._json_response({"error": "input_image (base64) is required"}, 400)
+                return
+            negative_prompt = body.get("negative_prompt", "")
+            seed = body.get("seed")
+            if seed is not None:
+                seed = int(seed)
+            steps = body.get("steps")
+            if steps is not None:
+                steps = int(steps)
+            denoise = body.get("denoise")
+            if denoise is not None:
+                denoise = float(denoise)
+
+            mode_label = "Create" if mode == "create" else "Edit"
+            job_id = jobs.create(mode=mode, title=f"{mode_label}: {positive_prompt[:60]}")
+            t = threading.Thread(
+                target=_run_image_task,
+                args=(job_id, mode, positive_prompt, negative_prompt,
+                      input_image, seed, steps, denoise),
+                daemon=True,
+            )
+            t.start()
+            self._json_response({"job_id": job_id, "session_id": job_id})
+
+        elif path == "/api/video/i2v":
+            body = self._read_body()
+            positive_prompt = body.get("positive_prompt", "")
+            input_image = body.get("input_image", "")
+            if not positive_prompt:
+                self._json_response({"error": "positive_prompt is required"}, 400)
+                return
+            if not input_image:
+                self._json_response({"error": "input_image (base64) is required"}, 400)
+                return
+            negative_prompt = body.get("negative_prompt", "")
+            width = int(body.get("width", 1088))
+            height = int(body.get("height", 720))
+            length = int(body.get("length", 81))
+            seed = body.get("seed")
+            if seed is not None:
+                seed = int(seed)
+            use_fast_lora = body.get("use_fast_lora", True)
+
+            job_id = jobs.create(mode="i2v", title=f"I2V: {positive_prompt[:60]}")
+            t = threading.Thread(
+                target=_run_i2v_task,
+                args=(job_id, positive_prompt, negative_prompt, input_image,
+                      width, height, length, seed, use_fast_lora),
+                daemon=True,
+            )
+            t.start()
+            self._json_response({"job_id": job_id, "session_id": job_id})
+
+        elif path == "/api/video/ltx-i2v":
+            body = self._read_body()
+            positive_prompt = body.get("positive_prompt", "")
+            input_image = body.get("input_image", "")
+            if not positive_prompt:
+                self._json_response({"error": "positive_prompt is required"}, 400)
+                return
+            if not input_image:
+                self._json_response({"error": "input_image (base64) is required"}, 400)
+                return
+            negative_prompt = body.get("negative_prompt", "")
+            width = int(body.get("width", 1280))
+            height = int(body.get("height", 720))
+            length = int(body.get("length", 241))
+            seed = body.get("seed")
+            if seed is not None:
+                seed = int(seed)
+            steps = int(body.get("steps", 20))
+            cfg_pass1 = float(body.get("cfg_pass1", 4.0))
+            cfg_pass2 = float(body.get("cfg_pass2", 1.0))
+
+            job_id = jobs.create(mode="ltx-i2v", title=f"LTX-I2V: {positive_prompt[:60]}")
+            t = threading.Thread(
+                target=_run_ltx_i2v_task,
+                args=(job_id, positive_prompt, negative_prompt, input_image,
+                      width, height, length, seed,
+                      steps, cfg_pass1, cfg_pass2),
+                daemon=True,
+            )
+            t.start()
+            self._json_response({"job_id": job_id, "session_id": job_id})
 
         else:
             self.send_error(404)

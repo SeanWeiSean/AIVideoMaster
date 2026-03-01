@@ -24,6 +24,12 @@
       <li class="nav-item" data-page="optimizer">
         <span class="nav-label">Prompt 优化</span>
       </li>
+      <li class="nav-item" data-page="imagetools">
+        <span class="nav-label">图片工具</span>
+      </li>
+      <li class="nav-item" data-page="videogen">
+        <span class="nav-label">视频生成</span>
+      </li>
       <li class="nav-item" data-page="templates">
         <span class="nav-label">模板管理</span>
       </li>
@@ -35,8 +41,14 @@
       </li>
     </ul>
     <div class="sidebar-footer">
-      <div class="status-dot" id="serverStatus"></div>
-      <span id="serverStatusText">连接中...</span>
+      <div class="status-row">
+        <div class="status-dot" id="serverStatus"></div>
+        <span id="serverStatusText">服务器: 检测中</span>
+      </div>
+      <div class="status-row">
+        <div class="status-dot" id="comfyuiStatus"></div>
+        <span id="comfyuiStatusText">ComfyUI: 检测中</span>
+      </div>
     </div>
   </nav>
 
@@ -148,15 +160,16 @@
     <section class="page" id="page-optimizer">
       <div class="page-header">
         <h2>Prompt 优化</h2>
-        <p class="subtitle">输入任意描述文字，根据 Wan2.2 最佳实践生成专业 Prompt</p>
+        <p class="subtitle">输入任意描述文字，根据最佳实践生成专业 Prompt</p>
       </div>
 
       <div class="form-row">
         <div class="form-group flex-1">
           <label>生成模式</label>
           <select id="optimizerMode">
-            <option value="t2v">文生视频 (T2V) — 完整 Prompt</option>
-            <option value="i2v">图生视频 (I2V) — 运动 + 运镜</option>
+            <option value="t2v">文生视频 (T2V) — 完整 Prompt (Wan2.2)</option>
+            <option value="i2v">图生视频 (I2V) — 运动 + 运镜 (Wan2.2)</option>
+            <option value="ltx-i2v">图生视频 (I2V) — 英文叙事 (LTX-2.0)</option>
           </select>
         </div>
       </div>
@@ -206,6 +219,284 @@
             <div class="optimizer-analysis-box" id="optimizerAnalysis"></div>
           </div>
 
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 图片工具页 ========== -->
+    <section class="page" id="page-imagetools">
+      <div class="page-header">
+        <h2>图片工具</h2>
+        <p class="subtitle">通过 ComfyUI + Qwen Image Edit 进行图片创建和编辑</p>
+      </div>
+
+      <!-- Tab 切换 -->
+      <div class="img-tabs">
+        <button class="img-tab active" data-tab="create" onclick="switchImageTab('create')">图片创建 (Create)</button>
+        <button class="img-tab" data-tab="edit" onclick="switchImageTab('edit')">图片编辑 (Edit)</button>
+      </div>
+
+      <!-- ── Create 面板 ── -->
+      <div class="img-tab-panel active" id="panel-create">
+        <div class="form-group">
+          <label>参考图片</label>
+          <div class="img-upload-area" id="createUploadArea" onclick="document.getElementById('createFileInput').click()">
+            <input type="file" id="createFileInput" accept="image/*" style="display:none"
+              onchange="handleImageUpload(event, 'create')">
+            <div class="img-upload-placeholder" id="createPlaceholder">
+              <div class="img-upload-icon">🖼️</div>
+              <div>点击上传或拖拽参考图片到此处</div>
+              <div class="img-upload-hint">支持 PNG / JPG / WebP</div>
+            </div>
+            <img id="createPreviewImg" class="img-upload-preview hidden" alt="预览">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>创作 Prompt</label>
+          <textarea id="createPositive" rows="4"
+            placeholder="描述你想要基于参考图创作的内容，如：A fantasy castle built on clouds, golden hour lighting..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>反向 Prompt (Negative，可选)</label>
+          <textarea id="createNegative" rows="2"
+            placeholder="worst quality, low quality, blurry, deformed..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label>采样步数</label>
+            <input type="number" id="createSteps" value="4" min="1" max="50">
+          </div>
+          <div class="form-group flex-1">
+            <label>去噪强度</label>
+            <input type="range" id="createDenoise" min="0" max="1" step="0.05" value="1"
+              oninput="document.getElementById('createDenoiseVal').textContent = this.value">
+            <div class="range-value" id="createDenoiseVal">1</div>
+          </div>
+          <div class="form-group flex-1">
+            <label>种子 (留空随机)</label>
+            <input type="number" id="createSeed" placeholder="随机">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="btn-group" style="margin-left:auto">
+            <button class="btn btn-primary" id="createStartBtn" onclick="startImageTask('create')">
+              开始创建
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Edit 面板 ── -->
+      <div class="img-tab-panel" id="panel-edit">
+        <div class="form-group">
+          <label>待编辑图片</label>
+          <div class="img-upload-area" id="editUploadArea" onclick="document.getElementById('editFileInput').click()">
+            <input type="file" id="editFileInput" accept="image/*" style="display:none"
+              onchange="handleImageUpload(event, 'edit')">
+            <div class="img-upload-placeholder" id="editPlaceholder">
+              <div class="img-upload-icon">✏️</div>
+              <div>点击上传或拖拽待编辑图片到此处</div>
+              <div class="img-upload-hint">支持 PNG / JPG / WebP</div>
+            </div>
+            <img id="editPreviewImg" class="img-upload-preview hidden" alt="预览">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>编辑指令 Prompt</label>
+          <textarea id="editPositive" rows="4"
+            placeholder="描述你想要对图片做的修改，如：Remove the text, change background to sunset..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>反向 Prompt (Negative，可选)</label>
+          <textarea id="editNegative" rows="2"
+            placeholder="worst quality, low quality, blurry..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label>采样步数</label>
+            <input type="number" id="editSteps" value="4" min="1" max="50">
+          </div>
+          <div class="form-group flex-1">
+            <label>去噪强度</label>
+            <input type="range" id="editDenoise" min="0" max="1" step="0.05" value="1"
+              oninput="document.getElementById('editDenoiseVal').textContent = this.value">
+            <div class="range-value" id="editDenoiseVal">1</div>
+          </div>
+          <div class="form-group flex-1">
+            <label>种子 (留空随机)</label>
+            <input type="number" id="editSeed" placeholder="随机">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="btn-group" style="margin-left:auto">
+            <button class="btn btn-primary" id="editStartBtn" onclick="startImageTask('edit')">
+              开始编辑
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 日志面板 -->
+      <div class="log-panel" id="imgLogPanel" style="display:none">
+        <div class="log-header">
+          <span>生成日志</span>
+          <span class="log-status" id="imgRunStatus"></span>
+        </div>
+        <div class="log-body" id="imgLogs">
+          <div class="log-placeholder">等待开始...</div>
+        </div>
+      </div>
+
+      <!-- 结果面板 -->
+      <div class="result-panel hidden" id="imgResultPanel">
+        <div class="result-header">
+          <h3>生成结果</h3>
+        </div>
+        <div class="result-body" id="imgResults">
+          <div class="img-result-container">
+            <img id="imgResultImage" class="img-result-preview" alt="生成结果">
+            <div class="img-result-actions">
+              <button class="btn btn-secondary" onclick="downloadResultImage()">💾 下载图片</button>
+              <button class="btn btn-secondary" onclick="copyResultImagePath()">📋 复制路径</button>
+              <button class="btn btn-secondary" onclick="useAsEditInput()">🔄 用作编辑输入</button>
+            </div>
+            <div class="img-result-info" id="imgResultInfo"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 视频生成页 (I2V) ========== -->
+    <section class="page" id="page-videogen">
+      <div class="page-header">
+        <h2>视频生成 (I2V)</h2>
+        <p class="subtitle">上传参考图 + 动作描述 → 图生视频</p>
+      </div>
+
+      <!-- 模型选择 -->
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label>视频模型</label>
+          <select id="i2vModel" onchange="onI2VModelChange()">
+            <option value="wan22" selected>Wan2.2 14B</option>
+            <option value="ltx2">LTX-2.0 19B</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 参考图上传 -->
+      <div class="form-group">
+        <label>参考图片</label>
+        <div class="img-upload-area" id="i2vUploadArea" onclick="document.getElementById('i2vFileInput').click()">
+          <input type="file" id="i2vFileInput" accept="image/*" style="display:none"
+            onchange="handleI2VImageUpload(event)">
+          <div class="img-upload-placeholder" id="i2vPlaceholder">
+            <div class="img-upload-icon">🎬</div>
+            <div>点击上传或拖拽参考图片到此处</div>
+            <div class="img-upload-hint">此图将作为视频的第一帧，支持 PNG / JPG / WebP</div>
+          </div>
+          <img id="i2vPreviewImg" class="img-upload-preview hidden" alt="预览">
+        </div>
+      </div>
+
+      <!-- Prompt -->
+      <div class="form-group">
+        <label>动作描述 Prompt</label>
+        <textarea id="i2vPositive" rows="4"
+          placeholder="描述画面中的动作和运镜，如：The girl slowly turns around, petals falling, camera dolly in..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>反向 Prompt (Negative，可选)</label>
+        <textarea id="i2vNegative" rows="2"
+          placeholder="留空使用默认反向 prompt"></textarea>
+      </div>
+
+      <!-- 参数 -->
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label>宽度</label>
+          <input type="number" id="i2vWidth" value="1088" min="128" max="2048" step="64">
+        </div>
+        <div class="form-group flex-1">
+          <label>高度</label>
+          <input type="number" id="i2vHeight" value="720" min="128" max="2048" step="64">
+        </div>
+        <div class="form-group flex-1">
+          <label>帧数</label>
+          <select id="i2vLength">
+            <option value="49">49帧 (~3秒)</option>
+            <option value="65">65帧 (~4秒)</option>
+            <option value="81" selected>81帧 (~5秒)</option>
+          </select>
+        </div>
+      </div>
+      <!-- Wan2.2 专属参数 -->
+      <div class="form-row" id="i2vWanParams">
+        <div class="form-group flex-1">
+          <label>质量模式</label>
+          <select id="i2vQuality">
+            <option value="fast" selected>快速 (4步 LoRA ~60s)</option>
+            <option value="quality">高质量 (20步 ~10min)</option>
+          </select>
+        </div>
+        <div class="form-group flex-1">
+          <label>种子 (留空随机)</label>
+          <input type="number" id="i2vSeed" placeholder="随机">
+        </div>
+      </div>
+      <!-- LTX-2.0 专属参数 -->
+      <div class="form-row" id="i2vLtxParams" style="display:none">
+        <div class="form-group flex-1">
+          <label>采样步数</label>
+          <input type="number" id="i2vLtxSteps" value="20" min="1" max="50">
+        </div>
+        <div class="form-group flex-1">
+          <label>CFG Pass1</label>
+          <input type="number" id="i2vLtxCfg1" value="4.0" min="0" max="20" step="0.5">
+        </div>
+        <div class="form-group flex-1">
+          <label>CFG Pass2</label>
+          <input type="number" id="i2vLtxCfg2" value="1.0" min="0" max="20" step="0.5">
+        </div>
+        <div class="form-group flex-1">
+          <label>种子 (留空随机)</label>
+          <input type="number" id="i2vLtxSeed" placeholder="随机">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="btn-group" style="margin-left:auto">
+          <button class="btn btn-primary" id="i2vStartBtn" onclick="startI2V()">
+            🎬 开始生成
+          </button>
+        </div>
+      </div>
+
+      <!-- 日志 -->
+      <div class="log-panel" id="i2vLogPanel" style="display:none">
+        <div class="log-header">
+          <span>生成日志</span>
+          <span class="log-status" id="i2vRunStatus"></span>
+        </div>
+        <div class="log-body" id="i2vLogs">
+          <div class="log-placeholder">等待开始...</div>
+        </div>
+      </div>
+
+      <!-- 结果 -->
+      <div class="result-panel hidden" id="i2vResultPanel">
+        <div class="result-header">
+          <h3>生成结果</h3>
+        </div>
+        <div class="result-body" id="i2vResults">
+          <div class="img-result-container">
+            <video id="i2vResultVideo" class="video-player" controls preload="metadata"></video>
+            <div class="img-result-actions">
+              <button class="btn btn-secondary" onclick="downloadI2VResult()">💾 下载视频</button>
+              <button class="btn btn-secondary" onclick="copyI2VResultPath()">📋 复制路径</button>
+            </div>
+            <div class="img-result-info" id="i2vResultInfo"></div>
+          </div>
         </div>
       </div>
     </section>

@@ -46,14 +46,40 @@ class PromptOptimizerAgent:
             text: 原始描述文字（中文或英文）
             mode: 生成模式
                   - "t2v": 文生视频（Text-to-Video），生成完整的正向 prompt
-                  - "i2v": 图生视频（Image-to-Video），只生成运动和运镜 prompt
+                  - "i2v": 图生视频（Image-to-Video / Wan2.2），只生成运动和运镜 prompt
+                  - "ltx-i2v": 图生视频（Image-to-Video / LTX-2.0），英文流畅段落叙事
 
         Returns:
             OptimizedPrompt 包含优化后的 positive/negative prompt 和分析说明
         """
         bestpractice = get_bestpractice_for_enrichment()
 
-        if mode == "i2v":
+        if mode == "ltx-i2v":
+            system_prompt = f"""You are an expert LTX-2.0 Image-to-Video (I2V) prompt engineer.
+
+LTX-2.0 I2V Prompt Best Practices:
+- The reference image already defines the character appearance, scene, and style
+- Do NOT describe the character's appearance (hair, clothing, features) — the image handles that
+- Write the prompt as a SINGLE FLOWING PARAGRAPH in English
+- Use PRESENT TENSE verbs for all actions and movements
+- Focus on: action/motion sequence, camera movement, atmosphere changes, audio description
+- Describe camera movement relative to the subject (e.g., "the camera slowly pushes in")
+- Express emotion through physical cues, not abstract labels (not "sad", but show the gesture)
+- Place spoken dialogue in quotation marks
+- Aim for 4-8 descriptive sentences
+- For static camera, explicitly write "static frame" or "the camera holds steady"
+
+I2V Formula: Motion + Camera Movement (+ optional: atmosphere/audio)
+
+Output ONLY valid JSON:
+```json
+{{{{
+  "positive_prompt": "English LTX I2V prompt as a single flowing paragraph...",
+  "negative_prompt": "blurry, low quality, still frame, frames, watermark, overlay, titles, has blurbox, has subtitles",
+  "analysis": "Chinese analysis explaining optimization decisions..."
+}}}}
+```"""
+        elif mode == "i2v":
             system_prompt = f"""You are an expert Wan2.2 Image-to-Video (I2V) prompt engineer.
 
 {bestpractice}
@@ -115,7 +141,7 @@ Output ONLY valid JSON:
 【原始描述】
 {text}
 
-【生成模式】{"图生视频 (I2V) — 只生成运动和运镜描述" if mode == "i2v" else "文生视频 (T2V) — 生成完整的视频描述"}
+【生成模式】{"LTX-2.0 图生视频 — 英文单段落叙事，聚焦动作/镜头/音频" if mode == "ltx-i2v" else "Wan2.2 图生视频 (I2V) — 只生成运动和运镜描述" if mode == "i2v" else "文生视频 (T2V) — 生成完整的视频描述"}
 
 请严格按照最佳实践公式输出优化后的 prompt，并在 analysis 中用中文解释你的优化思路。"""
 

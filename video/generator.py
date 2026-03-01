@@ -110,6 +110,40 @@ class ComfyUIClient:
         with request.urlopen(req, timeout=120) as resp:
             return resp.read()
 
+    def upload_image(self, image_data: bytes, filename: str, overwrite: bool = True) -> str:
+        """上传图片到 ComfyUI 的 input 目录，返回服务器端文件名。
+
+        使用 multipart/form-data 格式上传。
+        """
+        boundary = f"----ComfyUIBoundary{uuid.uuid4().hex[:16]}"
+        body_parts = []
+
+        # image 字段
+        body_parts.append(f"--{boundary}\r\n".encode())
+        body_parts.append(
+            f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'.encode()
+        )
+        body_parts.append(b"Content-Type: image/png\r\n\r\n")
+        body_parts.append(image_data)
+        body_parts.append(b"\r\n")
+
+        # overwrite 字段
+        body_parts.append(f"--{boundary}\r\n".encode())
+        body_parts.append(b'Content-Disposition: form-data; name="overwrite"\r\n\r\n')
+        body_parts.append(b"true" if overwrite else b"false")
+        body_parts.append(b"\r\n")
+
+        body_parts.append(f"--{boundary}--\r\n".encode())
+        body = b"".join(body_parts)
+
+        url = f"{self.base_url}/upload/image"
+        req = request.Request(url, data=body, method="POST")
+        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        with request.urlopen(req, timeout=self.timeout) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        # ComfyUI 返回 {"name": "filename.png", "subfolder": "", "type": "input"}
+        return result.get("name", filename)
+
     def is_alive(self) -> bool:
         try:
             self._request("/queue")

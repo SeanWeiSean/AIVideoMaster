@@ -1,12 +1,12 @@
 """
 Wan2.2 Prompt 最佳实践知识库
-从 promptbase/bestpractice.md 加载最佳实践，供各 Agent 引用。
+从 promptbase/wan22_bestpractice.md 加载最佳实践，供各 Agent 引用。
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-_BESTPRACTICE_PATH = Path(__file__).resolve().parent.parent / "promptbase" / "bestpractice.md"
+_BESTPRACTICE_PATH = Path(__file__).resolve().parent.parent / "promptbase" / "wan22_bestpractice.md"
 
 _cached_content: str | None = None
 

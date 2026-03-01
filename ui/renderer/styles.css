@@ -110,14 +110,20 @@ body {
 .nav-label { font-size: 14px; font-weight: 500; }
 
 .sidebar-footer {
-  padding: 16px 20px;
+  padding: 12px 20px;
   border-top: 1px solid var(--border);
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   font-size: 12px;
   color: var(--text-muted);
   -webkit-app-region: no-drag;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .status-dot {
@@ -943,4 +949,130 @@ select {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--accent);
+}
+
+/* ── Image Tools ───────────────────────────────────────────── */
+.img-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  width: fit-content;
+}
+
+.img-tab {
+  padding: 8px 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-family: inherit;
+}
+.img-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.img-tab.active {
+  background: linear-gradient(135deg, var(--accent), #7c3aed);
+  color: white;
+}
+
+.img-tab-panel {
+  display: none;
+}
+.img-tab-panel.active {
+  display: block;
+}
+
+/* Image Upload Area */
+.img-upload-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition);
+  background: var(--bg-input);
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+.img-upload-area:hover,
+.img-upload-area.drag-over {
+  border-color: var(--accent);
+  background: rgba(102, 126, 234, 0.05);
+}
+
+.img-upload-placeholder {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+.img-upload-icon {
+  font-size: 40px;
+  margin-bottom: 8px;
+}
+.img-upload-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.img-upload-preview {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: var(--radius);
+  object-fit: contain;
+}
+
+/* Range input for denoise */
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+  height: 6px;
+  margin-top: 4px;
+}
+.range-value {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-top: 4px;
+  font-family: 'Cascadia Code', monospace;
+}
+
+/* Image Result */
+.img-result-container {
+  text-align: center;
+}
+.img-result-preview {
+  max-width: 100%;
+  max-height: 600px;
+  border-radius: var(--radius);
+  object-fit: contain;
+  background: #000;
+  margin-bottom: 16px;
+}
+.img-result-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.img-result-info {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: 'Cascadia Code', monospace;
 }
