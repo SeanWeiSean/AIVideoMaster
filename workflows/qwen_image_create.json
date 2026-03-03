@@ -1,9 +1,9 @@
 {
   "60": {
     "inputs": {
-      "filename_prefix": "ComfyUI",
+      "filename_prefix": "Qwen-Image",
       "images": [
-        "102:8",
+        "76:8",
         0
       ]
     },
@@ -12,31 +12,7 @@
       "title": "保存图像"
     }
   },
-  "78": {
-    "inputs": {
-      "image": "image_qwen_image_edit_input_image.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "加载图像"
-    }
-  },
-  "93": {
-    "inputs": {
-      "upscale_method": "lanczos",
-      "megapixels": 1.5,
-      "resolution_steps": 1,
-      "image": [
-        "78",
-        0
-      ]
-    },
-    "class_type": "ImageScaleToTotalPixels",
-    "_meta": {
-      "title": "缩放图像（像素）"
-    }
-  },
-  "102:39": {
+  "76:39": {
     "inputs": {
       "vae_name": "qwen_image_vae.safetensors"
     },
@@ -45,80 +21,7 @@
       "title": "加载VAE"
     }
   },
-  "102:77": {
-    "inputs": {
-      "prompt": "",
-      "clip": [
-        "102:38",
-        0
-      ],
-      "vae": [
-        "102:39",
-        0
-      ],
-      "image": [
-        "78",
-        0
-      ]
-    },
-    "class_type": "TextEncodeQwenImageEdit",
-    "_meta": {
-      "title": "文本编码（QwenImageEdit）"
-    }
-  },
-  "102:75": {
-    "inputs": {
-      "strength": 1,
-      "model": [
-        "102:66",
-        0
-      ]
-    },
-    "class_type": "CFGNorm",
-    "_meta": {
-      "title": "CFG归一化"
-    }
-  },
-  "102:66": {
-    "inputs": {
-      "shift": 3,
-      "model": [
-        "102:89",
-        0
-      ]
-    },
-    "class_type": "ModelSamplingAuraFlow",
-    "_meta": {
-      "title": "采样算法（AuraFlow）"
-    }
-  },
-  "102:8": {
-    "inputs": {
-      "samples": [
-        "102:3",
-        0
-      ],
-      "vae": [
-        "102:39",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE解码"
-    }
-  },
-  "102:37": {
-    "inputs": {
-      "unet_name": "qwen_image_edit_fp8_e4m3fn.safetensors",
-      "weight_dtype": "default"
-    },
-    "class_type": "UNETLoader",
-    "_meta": {
-      "title": "UNet加载器"
-    }
-  },
-  "102:38": {
+  "76:38": {
     "inputs": {
       "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
       "type": "qwen_image",
@@ -129,28 +32,78 @@
       "title": "加载CLIP"
     }
   },
-  "102:88": {
+  "76:58": {
     "inputs": {
-      "pixels": [
-        "78",
-        0
-      ],
-      "vae": [
-        "102:39",
+      "width": 1328,
+      "height": 1328,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "空Latent图像（SD3）"
+    }
+  },
+  "76:66": {
+    "inputs": {
+      "shift": 3.1000000000000005,
+      "model": [
+        "76:73",
         0
       ]
     },
-    "class_type": "VAEEncode",
+    "class_type": "ModelSamplingAuraFlow",
     "_meta": {
-      "title": "VAE编码"
+      "title": "采样算法（AuraFlow）"
     }
   },
-  "102:89": {
+  "76:6": {
     "inputs": {
-      "lora_name": "Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors",
+      "text": "从门口进入视角，一个未来科幻风的三室一厅整体空间。主厅宽敞，以银白和深蓝为主色调，金属材质墙面，柔和霓虹灯带。中央是悬浮沙发和透明全息茶几，墙面有全息投影屏幕，地板带可发光纹理。左侧是玻璃隔断的全息工作室，有蓝色 HUD 接口；右侧是极简休息卧室，柔白氛围灯；前方是实验室风格的小型机房，有能量管线和数据节点。冷色写实光影，镜头从门口略广角拍摄，未来科技风，高真实度",
+      "clip": [
+        "76:38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "76:7": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "76:38",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "76:8": {
+    "inputs": {
+      "samples": [
+        "76:3",
+        0
+      ],
+      "vae": [
+        "76:39",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "76:73": {
+    "inputs": {
+      "lora_name": "Qwen-Image-Lightning-8steps-V1.0.safetensors",
       "strength_model": 1,
       "model": [
-        "102:37",
+        "76:37",
         0
       ]
     },
@@ -159,28 +112,28 @@
       "title": "LoRA加载器（仅模型）"
     }
   },
-  "102:3": {
+  "76:3": {
     "inputs": {
-      "seed": 976480016588017,
-      "steps": 4,
+      "seed": 1048802673875602,
+      "steps": 8,
       "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "simple",
       "denoise": 1,
       "model": [
-        "102:75",
+        "76:66",
         0
       ],
       "positive": [
-        "102:76",
+        "76:6",
         0
       ],
       "negative": [
-        "102:77",
+        "76:7",
         0
       ],
       "latent_image": [
-        "102:88",
+        "76:58",
         0
       ]
     },
@@ -189,25 +142,14 @@
       "title": "K采样器"
     }
   },
-  "102:76": {
+  "76:37": {
     "inputs": {
-      "prompt": "Remove all UI text elements from the image. Keep the feeling that the characters and scene are in water. Also, remove the green UI elements at the bottom.",
-      "clip": [
-        "102:38",
-        0
-      ],
-      "vae": [
-        "102:39",
-        0
-      ],
-      "image": [
-        "78",
-        0
-      ]
+      "unet_name": "qwen_image_fp8_e4m3fn.safetensors",
+      "weight_dtype": "default"
     },
-    "class_type": "TextEncodeQwenImageEdit",
+    "class_type": "UNETLoader",
     "_meta": {
-      "title": "文本编码（QwenImageEdit）"
+      "title": "UNet加载器"
     }
   }
 }

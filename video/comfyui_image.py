@@ -1,16 +1,21 @@
 """
-ComfyUI 图片生成客户端 (Qwen Image Edit / Create)
+ComfyUI 图片生成客户端 (Qwen Image Create V2 / Image Edit)
 
-通过 ComfyUI API 提交 Qwen Image Edit 工作流：
-- 图片创建 (Image Create): 参考图 + 创意 prompt → 生成新图片
+通过 ComfyUI API 提交 Qwen Image 工作流：
+- 图片创建 (Image Create): 纯文生图，基于 QwenImage V2 T2I 工作流
 - 图片编辑 (Image Edit): 原图 + 编辑指令 → 修改后的图片
 
-两个模式都基于 Qwen Image Edit 模型，都需要一张输入图片。
+Create 模式关键节点映射（qwen_image_create.json / Qwen T2I V2）：
+  "76:6"    — 正向 prompt (CLIPTextEncode, inputs.text)
+  "76:7"    — 反向 prompt (CLIPTextEncode, inputs.text)
+  "76:3"    — KSampler（seed, steps, denoise）
+  "76:58"   — EmptySD3LatentImage（width, height）
+  "60"      — SaveImage（输出）
 
-关键节点映射：
+Edit 模式关键节点映射（qwen_image_edit.json）：
   "78"      — LoadImage（输入图片文件名）
-  "102:76"  — 正向 prompt (TextEncodeQwenImageEdit)
-  "102:77"  — 反向 prompt (TextEncodeQwenImageEdit)
+  "102:76"  — 正向 prompt (TextEncodeQwenImageEdit, inputs.prompt)
+  "102:77"  — 反向 prompt (TextEncodeQwenImageEdit, inputs.prompt)
   "102:3"   — KSampler（seed, steps, denoise）
   "60"      — SaveImage（输出）
 """
@@ -32,10 +37,11 @@ _WORKFLOWS_DIR = Path(__file__).resolve().parent.parent / "workflows"
 IMAGE_WORKFLOW_PROFILES: dict[str, dict] = {
     "create": {
         "file": "qwen_image_create.json",
-        "positive_prompt_node": "102:76",   # TextEncodeQwenImageEdit — 正向
-        "negative_prompt_node": "102:77",   # TextEncodeQwenImageEdit — 反向
-        "load_image_node": "78",            # LoadImage — 输入图片
-        "sampler_node": "102:3",            # KSampler — seed / steps / denoise
+        "positive_prompt_node": "76:6",     # CLIPTextEncode — 正向 (inputs.text)
+        "negative_prompt_node": "76:7",     # CLIPTextEncode — 反向 (inputs.text)
+        "prompt_field": "text",             # CLIPTextEncode 使用 text 字段
+        "sampler_node": "76:3",             # KSampler — seed / steps / denoise
+        "latent_image_node": "76:58",       # EmptySD3LatentImage — 尺寸
         "output_node": "60",                # SaveImage — 输出
     },
     "edit": {
@@ -130,20 +136,21 @@ class ComfyUIImageClient:
 
         actual_seed = seed if seed is not None else int(time.time() * 1000) % (2**53)
 
-        # 注入输入图片文件名到 LoadImage 节点
-        load_node = profile.get("load_image_node", "78")
-        if load_node in wf:
+        # 注入输入图片文件名到 LoadImage 节点（仅图片编辑模式）
+        load_node = profile.get("load_image_node")
+        if load_node and load_node in wf:
             wf[load_node]["inputs"]["image"] = image_filename
 
-        # 注入正向 prompt
+        # 注入正向 prompt（字段名由 profile 决定：text 或 prompt）
         pos_node = profile.get("positive_prompt_node", "102:76")
+        prompt_field = profile.get("prompt_field", "prompt")
         if pos_node in wf:
-            wf[pos_node]["inputs"]["prompt"] = positive_prompt
+            wf[pos_node]["inputs"][prompt_field] = positive_prompt
 
         # 注入反向 prompt
         neg_node = profile.get("negative_prompt_node", "102:77")
         if neg_node in wf:
-            wf[neg_node]["inputs"]["prompt"] = negative_prompt
+            wf[neg_node]["inputs"][prompt_field] = negative_prompt
 
         # 注入 KSampler 参数
         sampler_node = profile.get("sampler_node", "102:3")
@@ -256,17 +263,20 @@ class ComfyUIImageClient:
                 status="failed", error=f"未知模式: {mode}",
             )
 
-        if not input_image_b64:
+        load_image_node = profile.get("load_image_node")
+        if not input_image_b64 and load_image_node:
             return ImageJob(
                 job_id="", mode=mode, prompt=positive_prompt,
                 status="failed", error="需要上传输入图片",
             )
 
         try:
-            # 1. 上传图片到 ComfyUI
+            # 1. 上传图片到 ComfyUI（仅当工作流有 LoadImage 节点时）
             ts = int(time.time())
-            upload_filename = f"avm_{mode}_{ts}.png"
-            server_filename = self._upload_input_image(input_image_b64, upload_filename)
+            server_filename = ""
+            if load_image_node and input_image_b64:
+                upload_filename = f"avm_{mode}_{ts}.png"
+                server_filename = self._upload_input_image(input_image_b64, upload_filename)
 
             # 2. 构建工作流
             wf = self._build_workflow(
