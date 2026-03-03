@@ -40,3 +40,6 @@ Desktop.ini
 # Environment
 .env
 *.log
+
+# Local ignore folder
+ignorefile/
