@@ -22,6 +22,7 @@ class LLMConfig:
 class VideoConfig:
     """视频生成配置 (ComfyUI + Wan2.2)"""
     comfyui_url: str = os.getenv("COMFYUI_URL", "http://localhost:8188")
+    comfyui_api_key: str = os.getenv("COMFYUI_API_KEY", "")  # X-API-Key / Bearer 认证密钥，留空则不鉴权
     workflow_path: str = os.getenv("COMFYUI_WORKFLOW", "")  # 留空则使用内置默认
     quality_mode: str = os.getenv("VIDEO_QUALITY", "fast")  # "fast"(Lora4步~60s) / "quality"(标准20步~10min) / "cocktail_lora"(鸡尾酒LoRA 10步)
     # Wan2.2 默认参数

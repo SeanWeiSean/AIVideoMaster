@@ -1076,3 +1076,188 @@ input[type="range"] {
   color: var(--text-muted);
   font-family: 'Cascadia Code', monospace;
 }
+
+/* ── Agent Image Creator ──────────────────────────────────── */
+
+/* Prompt 卡片 */
+.agent-prompt-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  transition: border-color var(--transition);
+}
+.agent-prompt-card:hover {
+  border-color: var(--accent);
+}
+
+.agent-prompt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.agent-prompt-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.agent-prompt-text {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: rgba(0,0,0,0.25);
+  border-left: 3px solid var(--accent);
+  padding: 10px 12px;
+  border-radius: 0 6px 6px 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: border-color 0.3s ease;
+}
+
+.agent-blueprint-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: rgba(0,0,0,0.2);
+  border-left: 3px solid var(--warning);
+  padding: 10px 12px;
+  border-radius: 0 6px 6px 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 6px;
+}
+
+/* 图片结果网格 */
+.agent-img-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.agent-img-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: all var(--transition);
+  display: flex;
+  flex-direction: column;
+}
+.agent-img-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+
+.agent-img-slot-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 8px 12px 4px;
+}
+
+.agent-result-img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+  background: #000;
+}
+
+.agent-prompt-mini {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 8px 12px;
+  line-height: 1.5;
+  font-family: 'Cascadia Code', monospace;
+  flex: 1;
+}
+
+.agent-img-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 12px;
+  flex-wrap: wrap;
+}
+
+.agent-img-actions .btn {
+  flex: 1;
+  justify-content: center;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+/* Generating 占位 */
+.agent-img-generating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 24px;
+  color: var(--text-muted);
+  font-size: 13px;
+  flex: 1;
+}
+
+.agent-img-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--error);
+  font-size: 13px;
+  text-align: center;
+  flex: 1;
+}
+
+/* Spinner */
+.agent-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Agent toggle checkbox */
+.agent-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 6px 0;
+}
+.agent-toggle-label input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.agent-toggle-text {
+  font-weight: 500;
+}
+.agent-toggle-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  padding-left: 23px;
+}

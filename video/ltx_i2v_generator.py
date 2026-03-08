@@ -89,8 +89,8 @@ class LtxI2VGenerator:
     prompt 应聚焦于动作、镜头运动和音频，不要描述角色外貌。
     """
 
-    def __init__(self, comfyui_url: str, output_dir: str = "./output") -> None:
-        self.client = ComfyUIClient(comfyui_url)
+    def __init__(self, comfyui_url: str, output_dir: str = "./output", api_key: str = "") -> None:
+        self.client = ComfyUIClient(comfyui_url, api_key=api_key)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._base_workflow = self._load_workflow()

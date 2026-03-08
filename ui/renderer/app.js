@@ -317,11 +317,18 @@ function updateOptimizerCharCount() {
 
 // ── Image Tools ─────────────────────────────────────────────
 
+// ── 通用图片工具状态 ──
 let imgSession = null;
 let imgPollTimer = null;
 let imgLogOffset = 0;
-let imageBase64 = { create: '', edit: '' };
+let imageBase64 = { edit: '', createV1: '' };  // edit tab + create V1 用
 let lastResultImagePath = '';
+
+// ── 智能体创作专属状态 ──
+let agentJobId = null;
+let agentPollTimer = null;
+let agentLogOffset = 0;
+let agentSlotStates = [];             // 当前所有 slot 的状态快照
 
 function switchImageTab(tab) {
   document.querySelectorAll('.img-tab').forEach(t => t.classList.remove('active'));
@@ -330,6 +337,7 @@ function switchImageTab(tab) {
   document.getElementById(`panel-${tab}`).classList.add('active');
 }
 
+// ── 图片上传（edit tab）──
 function handleImageUpload(event, mode) {
   const file = event.target.files[0];
   if (!file) return;
@@ -344,28 +352,296 @@ function handleImageUpload(event, mode) {
   reader.readAsDataURL(file);
 }
 
-// 拖拽上传支持（两个面板都支持）
+// 拖拽上传
 document.addEventListener('DOMContentLoaded', () => {
-  ['create', 'edit'].forEach(mode => {
-    const uploadArea = document.getElementById(`${mode}UploadArea`);
-    if (!uploadArea) return;
-    uploadArea.addEventListener('dragover', (e) => {
+  // Edit tab 拖拽
+  const editArea = document.getElementById('editUploadArea');
+  if (editArea) {
+    editArea.addEventListener('dragover', (e) => { e.preventDefault(); editArea.classList.add('drag-over'); });
+    editArea.addEventListener('dragleave', () => editArea.classList.remove('drag-over'));
+    editArea.addEventListener('drop', (e) => {
       e.preventDefault();
-      uploadArea.classList.add('drag-over');
-    });
-    uploadArea.addEventListener('dragleave', () => {
-      uploadArea.classList.remove('drag-over');
-    });
-    uploadArea.addEventListener('drop', (e) => {
-      e.preventDefault();
-      uploadArea.classList.remove('drag-over');
+      editArea.classList.remove('drag-over');
       const file = e.dataTransfer.files[0];
-      if (file && file.type.startsWith('image/')) {
-        handleImageUpload({ target: { files: [file] } }, mode);
-      }
+      if (file && file.type.startsWith('image/')) handleImageUpload({ target: { files: [file] } }, 'edit');
     });
-  });
+  }
 });
+
+// ── AI 智能体创作 ─────────────────────────────────────────
+
+function updateAgentBtn() {
+  const on = document.getElementById('agentUseAgent').checked;
+  document.getElementById('agentStartBtn').textContent =
+    on ? '🏗️ 建筑师 + 描述师 启动' : '⚡ 直接提交生图';
+  document.getElementById('agentToggleHint').textContent =
+    on ? '已启用：输入的意图将经由建筑师与描述师深度润色后再生图'
+       : '已关闭：输入内容将直接作为 Prompt 提交给 ComfyUI';
+}
+
+function onCreateVersionChange(version) {
+  const v1Area = document.getElementById('createV1ImageArea');
+  v1Area.style.display = version === 'v1' ? '' : 'none';
+  // V2 默认步数 8，V1 默认步数 4
+  const stepsEl = document.getElementById('agentSteps');
+  if (stepsEl) stepsEl.value = version === 'v2' ? '8' : '4';
+}
+
+async function startImageAgentTask() {
+  const intent = document.getElementById('agentUserIntent').value.trim();
+  if (!intent) { alert('请输入创作意图'); return; }
+
+  const workflowVersion = document.querySelector('input[name="createVersion"]:checked')?.value || 'v2';
+  const useAgent = document.getElementById('agentUseAgent').checked;
+  const count = parseInt(document.getElementById('agentCount').value) || 1;
+  const steps = parseInt(document.getElementById('agentSteps').value) || (workflowVersion === 'v2' ? 8 : 4);
+  const denoise = parseFloat(document.getElementById('agentDenoise').value);
+  const seedVal = document.getElementById('agentSeed').value.trim();
+  const seed = seedVal ? parseInt(seedVal) : null;
+
+  // V1 需要参考图
+  if (workflowVersion === 'v1' && !imageBase64['createV1']) {
+    alert('V1 模式需要上传一张参考图');
+    return;
+  }
+  const inputImageB64 = workflowVersion === 'v1' ? imageBase64['createV1'] : '';
+
+  const btn = document.getElementById('agentStartBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 运行中...';
+
+  // 重置 UI
+  document.getElementById('agentLogPanel').style.display = '';
+  clearLogs('agentLogs');
+  setRunStatus('agentRunStatus', 'running', '运行中...');
+  document.getElementById('agentPromptPanel').style.display = 'none';
+  document.getElementById('agentPromptCards').innerHTML = '';
+  document.getElementById('agentResultGrid').style.display = 'none';
+  document.getElementById('agentImgGrid').innerHTML = '';
+  agentSlotStates = [];
+
+  try {
+    const res = await fetch(`${API_BASE}/api/image/create-with-agent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_intent: intent,
+        use_agent: useAgent,
+        workflow_version: workflowVersion,
+        input_image: inputImageB64,
+        count, steps, denoise, seed,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    agentJobId = data.job_id;
+    agentLogOffset = 0;
+    appendLog('agentLogs', `Job ID: ${data.job_id}`, 'highlight');
+    startAgentPolling();
+  } catch (e) {
+    setRunStatus('agentRunStatus', 'error', '启动失败');
+    appendLog('agentLogs', `[ERROR] ${e.message}`, 'error');
+    btn.disabled = false;
+    btn.textContent = document.getElementById('agentUseAgent').checked ? '🏗️ 建筑师 + 描述师 启动' : '⚡ 直接提交生图';
+  }
+}
+
+function startAgentPolling() {
+  agentPollTimer = setInterval(async () => {
+    if (!agentJobId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/session-logs/${agentJobId}?after=${agentLogOffset}`);
+      const data = await res.json();
+
+      if (data.logs && data.logs.length > 0) {
+        data.logs.forEach(line => appendLog('agentLogs', line));
+        agentLogOffset = data.total;
+      }
+
+      // 同步 slot 状态（result 中带实时数据）
+      if (data.result && data.result.slots) {
+        renderAgentSlots(data.result.slots);
+      }
+
+      if (data.status === 'done' || data.status === 'error') {
+        clearInterval(agentPollTimer);
+        agentPollTimer = null;
+
+        if (data.status === 'done') {
+          setRunStatus('agentRunStatus', 'done', '完成');
+        } else {
+          setRunStatus('agentRunStatus', 'error', '出错');
+        }
+
+        const btn = document.getElementById('agentStartBtn');
+        btn.disabled = false;
+        btn.textContent = document.getElementById('agentUseAgent').checked ? '🏗️ 建筑师 + 描述师 启动' : '⚡ 直接提交生图';
+      }
+    } catch (e) { /* retry */ }
+  }, 1500);
+}
+
+function renderAgentSlots(slots) {
+  agentSlotStates = slots;
+
+  const promptCards = document.getElementById('agentPromptCards');
+  const imgGrid = document.getElementById('agentImgGrid');
+  let hasPrompt = false;
+  let hasResult = false;
+
+  promptCards.innerHTML = '';
+  imgGrid.innerHTML = '';
+
+  slots.forEach((slot, i) => {
+    // Prompt 卡片
+    if (slot.prompt) {
+      hasPrompt = true;
+      const card = document.createElement('div');
+      card.className = 'agent-prompt-card';
+      card.innerHTML = `
+        <div class="agent-prompt-header">
+          <span class="agent-prompt-label">Prompt ${i + 1}</span>
+          <button class="btn-copy" onclick="copyAgentPrompt(${i})">复制</button>
+        </div>
+        <div class="agent-prompt-text" id="agentPrompt_${i}">${esc(slot.prompt)}</div>
+        ${slot.blueprint ? `
+        <details style="margin-top:8px">
+          <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);padding:4px 0">
+            🏗️ 建筑师蓝图（展开查看）
+          </summary>
+          <div class="agent-blueprint-text">${esc(slot.blueprint)}</div>
+        </details>` : ''}
+      `;
+      promptCards.appendChild(card);
+    }
+
+    // 图片结果卡片
+    const imgCard = document.createElement('div');
+    imgCard.className = 'agent-img-card';
+    imgCard.id = `agentImgCard_${i}`;
+
+    if (slot.status === 'success' && slot.file_path) {
+      hasResult = true;
+      const imgUrl = `${API_BASE}/api/file?path=${encodeURIComponent(slot.file_path)}`;
+      imgCard.innerHTML = `
+        <div class="agent-img-slot-label">图 ${i + 1}</div>
+        <img class="agent-result-img" src="${imgUrl}" alt="结果 ${i + 1}" loading="lazy">
+        <div class="agent-prompt-mini">${esc((slot.prompt || '').substring(0, 60))}${slot.prompt && slot.prompt.length > 60 ? '...' : ''}</div>
+        <div class="agent-img-actions">
+          <button class="btn btn-secondary" onclick="downloadAgentImage('${imgUrl.replace(/'/g,"\\'")}', ${i})">💾 下载</button>
+          <button class="btn btn-secondary" onclick="regenerateImage('${agentJobId}', ${i})">🔄 重做</button>
+        </div>
+      `;
+    } else if (slot.status === 'failed') {
+      hasResult = true;
+      imgCard.innerHTML = `
+        <div class="agent-img-slot-label">图 ${i + 1}</div>
+        <div class="agent-img-error">❌ 生成失败<br><small>${esc(slot.error || '')}</small></div>
+        <div class="agent-img-actions">
+          <button class="btn btn-secondary" onclick="regenerateImage('${agentJobId}', ${i})">🔄 重试</button>
+        </div>
+      `;
+    } else if (slot.status === 'generating') {
+      imgCard.innerHTML = `
+        <div class="agent-img-slot-label">图 ${i + 1}</div>
+        <div class="agent-img-generating">
+          <div class="agent-spinner"></div>
+          <div>ComfyUI 生图中...</div>
+        </div>
+      `;
+    } else {
+      imgCard.innerHTML = `
+        <div class="agent-img-slot-label">图 ${i + 1}</div>
+        <div class="agent-img-generating">
+          <div class="agent-spinner"></div>
+          <div>智能体思考中...</div>
+        </div>
+      `;
+    }
+    imgGrid.appendChild(imgCard);
+  });
+
+  if (hasPrompt) document.getElementById('agentPromptPanel').style.display = '';
+  if (hasResult || slots.some(s => ['generating','success','failed'].includes(s.status))) {
+    document.getElementById('agentResultGrid').style.display = '';
+  }
+}
+
+function copyAgentPrompt(slotIndex) {
+  const el = document.getElementById(`agentPrompt_${slotIndex}`);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).catch(() => {});
+  el.style.borderColor = 'var(--success)';
+  setTimeout(() => { el.style.borderColor = ''; }, 1000);
+}
+
+function downloadAgentImage(url, index) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ai_create_${index + 1}.png`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function regenerateImage(jobId, slotIndex) {
+  const slot = agentSlotStates[slotIndex];
+  if (!slot || !slot.prompt) { alert('无 Prompt 可用，请先完成智能体运行'); return; }
+
+  const workflowVersion = document.querySelector('input[name="createVersion"]:checked')?.value || 'v2';
+  const steps = parseInt(document.getElementById('agentSteps').value) || (workflowVersion === 'v2' ? 8 : 4);
+  const denoise = parseFloat(document.getElementById('agentDenoise').value);
+  const inputImageB64 = workflowVersion === 'v1' ? (imageBase64['createV1'] || '') : '';
+
+  // 更新 UI 为 generating 状态
+  const card = document.getElementById(`agentImgCard_${slotIndex}`);
+  if (card) {
+    card.innerHTML = `
+      <div class="agent-img-slot-label">图 ${slotIndex + 1}</div>
+      <div class="agent-img-generating">
+        <div class="agent-spinner"></div>
+        <div>重新生图中...</div>
+      </div>
+    `;
+  }
+
+  try {
+    await fetch(`${API_BASE}/api/image/regenerate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        job_id: jobId,
+        slot_index: slotIndex,
+        prompt: slot.prompt,
+        workflow_version: workflowVersion,
+        input_image: inputImageB64,
+        steps, denoise,
+        seed: null,  // 随机种子，确保不同结果
+      }),
+    });
+
+    // 开始轮询这个 slot 直到完成
+    const pollRegen = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/session/${jobId}`);
+        const data = await res.json();
+        const slots = data.result && data.result.slots ? data.result.slots : [];
+        const updated = slots.find(s => s.index === slotIndex);
+        if (updated && (updated.status === 'success' || updated.status === 'failed')) {
+          clearInterval(pollRegen);
+          agentSlotStates = slots;
+          renderAgentSlots(slots);
+        }
+      } catch (e) { /* retry */ }
+    }, 1500);
+
+  } catch (e) {
+    alert('重做请求失败: ' + e.message);
+  }
+}
+
+// ── 编辑模式（旧逻辑保留）──────────────────────────────────
 
 async function startImageTask(mode) {
   const positive = document.getElementById(`${mode}Positive`).value.trim();
@@ -436,7 +712,6 @@ function startImagePolling(mode, origBtnText) {
           setRunStatus('imgRunStatus', 'error', '出错');
         }
 
-        // 恢复按钮
         const btn = document.getElementById(`${mode}StartBtn`);
         if (btn) { btn.disabled = false; btn.textContent = origBtnText; }
       }
@@ -456,10 +731,7 @@ async function showImageResult() {
       lastResultImagePath = result.file_path;
       const imgUrl = `${API_BASE}/api/file?path=${encodeURIComponent(result.file_path)}`;
       document.getElementById('imgResultImage').src = imgUrl;
-
-      const modeLabel = result.mode === 'edit' ? '图片编辑' : '图片创建';
-      document.getElementById('imgResultInfo').textContent = `模式: ${modeLabel}`;
-
+      document.getElementById('imgResultInfo').textContent = `模式: 图片编辑`;
       document.getElementById('imgResultPanel').classList.remove('hidden');
     } else if (result.error) {
       appendLog('imgLogs', `[FAIL] ${result.error}`, 'error');
@@ -490,11 +762,7 @@ function copyResultImagePath() {
 function useAsEditInput() {
   const img = document.getElementById('imgResultImage');
   if (!img.src) return;
-
-  // 切换到 Edit tab
   switchImageTab('edit');
-
-  // 将结果图转为 base64 设置为 Edit 输入
   const canvas = document.createElement('canvas');
   canvas.width = img.naturalWidth;
   canvas.height = img.naturalHeight;
@@ -506,6 +774,7 @@ function useAsEditInput() {
   document.getElementById('editPreviewImg').classList.remove('hidden');
   document.getElementById('editPlaceholder').classList.add('hidden');
 }
+
 
 async function runPromptOptimizer() {
   const text = document.getElementById('optimizerInput').value.trim();

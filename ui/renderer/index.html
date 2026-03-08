@@ -227,66 +227,126 @@
     <section class="page" id="page-imagetools">
       <div class="page-header">
         <h2>图片工具</h2>
-        <p class="subtitle">通过 ComfyUI + Qwen Image Edit 进行图片创建和编辑</p>
+        <p class="subtitle">建筑师 + 描述师 双智能体 → Qwen Image 创作 · 支持批量生成与单张重做</p>
       </div>
 
       <!-- Tab 切换 -->
       <div class="img-tabs">
-        <button class="img-tab active" data-tab="create" onclick="switchImageTab('create')">图片创建 (Create)</button>
-        <button class="img-tab" data-tab="edit" onclick="switchImageTab('edit')">图片编辑 (Edit)</button>
+        <button class="img-tab active" data-tab="create" onclick="switchImageTab('create')">✨ AI 智能创作</button>
+        <button class="img-tab" data-tab="edit" onclick="switchImageTab('edit')">✏️ 图片编辑</button>
       </div>
 
-      <!-- ── Create 面板 ── -->
+      <!-- ── AI 智能创作面板 ── -->
       <div class="img-tab-panel active" id="panel-create">
+
+        <!-- 用户意图 -->
         <div class="form-group">
-          <label>参考图片</label>
-          <div class="img-upload-area" id="createUploadArea" onclick="document.getElementById('createFileInput').click()">
-            <input type="file" id="createFileInput" accept="image/*" style="display:none"
-              onchange="handleImageUpload(event, 'create')">
-            <div class="img-upload-placeholder" id="createPlaceholder">
-              <div class="img-upload-icon">🖼️</div>
-              <div>点击上传或拖拽参考图片到此处</div>
-              <div class="img-upload-hint">支持 PNG / JPG / WebP</div>
-            </div>
-            <img id="createPreviewImg" class="img-upload-preview hidden" alt="预览">
+          <label>创作意图</label>
+          <textarea id="agentUserIntent" rows="3"
+            placeholder="例：一个古代将军骑马站在城楼上，俯视下方的军队，黄昏时分..."></textarea>
+        </div>
+
+        <!-- 工作流版本选择 -->
+        <div class="form-group" style="margin-top:0;padding-top:0">
+          <label>生图模式</label>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-weight:normal">
+              <input type="radio" name="createVersion" value="v2" checked onchange="onCreateVersionChange(this.value)">
+              <span>✨ V2 纯文生图（Qwen T2I V2，无需参考图，推荐）</span>
+            </label>
+            <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-weight:normal">
+              <input type="radio" name="createVersion" value="v1" onchange="onCreateVersionChange(this.value)">
+              <span>🖼️ V1 参考图创作（Qwen Edit LoRA，需上传参考图）</span>
+            </label>
           </div>
         </div>
-        <div class="form-group">
-          <label>创作 Prompt</label>
-          <textarea id="createPositive" rows="4"
-            placeholder="描述你想要基于参考图创作的内容，如：A fantasy castle built on clouds, golden hour lighting..."></textarea>
+
+        <!-- V1 参考图上传（默认隐藏） -->
+        <div id="createV1ImageArea" class="form-group" style="display:none;margin-top:0">
+          <label>参考图（V1 模式必填）</label>
+          <div class="upload-area" id="createV1UploadArea" onclick="document.getElementById('createV1FileInput').click()">
+            <div class="upload-placeholder" id="createV1Placeholder">
+              <span>📁 点击上传参考图</span>
+            </div>
+            <img id="createV1PreviewImg" class="upload-preview" style="display:none">
+          </div>
+          <input type="file" id="createV1FileInput" accept="image/*" style="display:none"
+            onchange="handleImageUpload(event, 'createV1')">
         </div>
-        <div class="form-group">
-          <label>反向 Prompt (Negative，可选)</label>
-          <textarea id="createNegative" rows="2"
-            placeholder="worst quality, low quality, blurry, deformed..."></textarea>
+
+        <!-- 智能体开关 -->
+        <div class="form-group" style="margin-top:0;padding-top:0">
+          <label class="agent-toggle-label">
+            <input type="checkbox" id="agentUseAgent" checked onchange="updateAgentBtn()">
+            <span class="agent-toggle-text">🤖 启用多智能体润色（建筑师扩充蓝图 + 描述师生成 Prompt）</span>
+          </label>
+          <div id="agentToggleHint" class="agent-toggle-hint">已启用：输入的意图将经由建筑师与描述师深度润色后再生图</div>
         </div>
+
+        <!-- 生成数量 + 参数 -->
         <div class="form-row">
           <div class="form-group flex-1">
+            <label>生成数量</label>
+            <select id="agentCount">
+              <option value="1" selected>1 张</option>
+              <option value="2">2 张</option>
+              <option value="3">3 张</option>
+              <option value="4">4 张</option>
+            </select>
+          </div>
+          <div class="form-group flex-1">
             <label>采样步数</label>
-            <input type="number" id="createSteps" value="4" min="1" max="50">
+            <input type="number" id="agentSteps" value="8" min="1" max="50">
           </div>
           <div class="form-group flex-1">
             <label>去噪强度</label>
-            <input type="range" id="createDenoise" min="0" max="1" step="0.05" value="1"
-              oninput="document.getElementById('createDenoiseVal').textContent = this.value">
-            <div class="range-value" id="createDenoiseVal">1</div>
+            <input type="range" id="agentDenoise" min="0" max="1" step="0.05" value="1"
+              oninput="document.getElementById('agentDenoiseVal').textContent = this.value">
+            <div class="range-value" id="agentDenoiseVal">1</div>
           </div>
           <div class="form-group flex-1">
             <label>种子 (留空随机)</label>
-            <input type="number" id="createSeed" placeholder="随机">
+            <input type="number" id="agentSeed" placeholder="随机">
           </div>
         </div>
         <div class="form-row">
           <div class="btn-group" style="margin-left:auto">
-            <button class="btn btn-primary" id="createStartBtn" onclick="startImageTask('create')">
-              开始创建
+            <button class="btn btn-primary" id="agentStartBtn" onclick="startImageAgentTask()">
+              🏗️ 建筑师 + 描述师 启动
             </button>
           </div>
         </div>
+
+        <!-- 进度面板（建筑师蓝图 + Prompt 实时显示） -->
+        <div class="log-panel" id="agentLogPanel" style="display:none">
+          <div class="log-header">
+            <span>智能体运行日志</span>
+            <span class="log-status" id="agentRunStatus"></span>
+          </div>
+          <div class="log-body" id="agentLogs">
+            <div class="log-placeholder">等待开始...</div>
+          </div>
+        </div>
+
+        <!-- Prompt 卡片区（实时出现） -->
+        <div id="agentPromptPanel" style="display:none; margin-top:16px">
+          <div style="font-size:13px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px">
+            📝 生成的 Prompt
+          </div>
+          <div id="agentPromptCards"></div>
+        </div>
+
+        <!-- 图片结果网格 -->
+        <div id="agentResultGrid" style="display:none; margin-top:16px">
+          <div style="font-size:13px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px">
+            🖼️ 生成结果
+          </div>
+          <div class="agent-img-grid" id="agentImgGrid"></div>
+        </div>
+
       </div>
 
-      <!-- ── Edit 面板 ── -->
+      <!-- ── 图片编辑面板 ── -->
       <div class="img-tab-panel" id="panel-edit">
         <div class="form-group">
           <label>待编辑图片</label>
@@ -334,33 +394,29 @@
             </button>
           </div>
         </div>
-      </div>
 
-      <!-- 日志面板 -->
-      <div class="log-panel" id="imgLogPanel" style="display:none">
-        <div class="log-header">
-          <span>生成日志</span>
-          <span class="log-status" id="imgRunStatus"></span>
+        <!-- 日志 & 结果（编辑模式，复用原有逻辑） -->
+        <div class="log-panel" id="imgLogPanel" style="display:none">
+          <div class="log-header">
+            <span>生成日志</span>
+            <span class="log-status" id="imgRunStatus"></span>
+          </div>
+          <div class="log-body" id="imgLogs">
+            <div class="log-placeholder">等待开始...</div>
+          </div>
         </div>
-        <div class="log-body" id="imgLogs">
-          <div class="log-placeholder">等待开始...</div>
-        </div>
-      </div>
-
-      <!-- 结果面板 -->
-      <div class="result-panel hidden" id="imgResultPanel">
-        <div class="result-header">
-          <h3>生成结果</h3>
-        </div>
-        <div class="result-body" id="imgResults">
-          <div class="img-result-container">
-            <img id="imgResultImage" class="img-result-preview" alt="生成结果">
-            <div class="img-result-actions">
-              <button class="btn btn-secondary" onclick="downloadResultImage()">💾 下载图片</button>
-              <button class="btn btn-secondary" onclick="copyResultImagePath()">📋 复制路径</button>
-              <button class="btn btn-secondary" onclick="useAsEditInput()">🔄 用作编辑输入</button>
+        <div class="result-panel hidden" id="imgResultPanel">
+          <div class="result-header"><h3>编辑结果</h3></div>
+          <div class="result-body" id="imgResults">
+            <div class="img-result-container">
+              <img id="imgResultImage" class="img-result-preview" alt="生成结果">
+              <div class="img-result-actions">
+                <button class="btn btn-secondary" onclick="downloadResultImage()">💾 下载图片</button>
+                <button class="btn btn-secondary" onclick="copyResultImagePath()">📋 复制路径</button>
+                <button class="btn btn-secondary" onclick="useAsEditInput()">🔄 用作编辑输入</button>
+              </div>
+              <div class="img-result-info" id="imgResultInfo"></div>
             </div>
-            <div class="img-result-info" id="imgResultInfo"></div>
           </div>
         </div>
       </div>

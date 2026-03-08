@@ -35,6 +35,7 @@ _WORKFLOWS_DIR = Path(__file__).resolve().parent.parent / "workflows"
 # ── 预设工作流配置 ────────────────────────────────────────────
 
 IMAGE_WORKFLOW_PROFILES: dict[str, dict] = {
+    # V2 — 纯文生图（QwenImage T2I V2，无需输入图片）
     "create": {
         "file": "qwen_image_create.json",
         "positive_prompt_node": "76:6",     # CLIPTextEncode — 正向 (inputs.text)
@@ -42,6 +43,16 @@ IMAGE_WORKFLOW_PROFILES: dict[str, dict] = {
         "prompt_field": "text",             # CLIPTextEncode 使用 text 字段
         "sampler_node": "76:3",             # KSampler — seed / steps / denoise
         "latent_image_node": "76:58",       # EmptySD3LatentImage — 尺寸
+        "output_node": "60",                # SaveImage — 输出
+    },
+    # V1 — 参考图+创意 prompt → 新图（QwenImage Edit LoRA，需要输入图片）
+    "create-v1": {
+        "file": "qwen_image_createV1.json",
+        "positive_prompt_node": "102:76",   # TextEncodeQwenImageEdit — 正向 (inputs.prompt)
+        "negative_prompt_node": "102:77",   # TextEncodeQwenImageEdit — 反向 (inputs.prompt)
+        "prompt_field": "prompt",
+        "load_image_node": "78",            # LoadImage — 输入参考图
+        "sampler_node": "102:3",            # KSampler — seed / steps / denoise
         "output_node": "60",                # SaveImage — 输出
     },
     "edit": {
@@ -181,27 +192,30 @@ class ComfyUIImageClient:
     def image_create(
         self,
         positive_prompt: str,
-        input_image_b64: str,
+        input_image_b64: str = "",
         negative_prompt: str = "",
         seed: int | None = None,
         steps: int | None = None,
         denoise: float | None = None,
         output_name: str = "",
+        workflow_version: str = "v2",
     ) -> ImageJob:
         """
-        图片创建：参考图 + 创意 prompt → 生成新图片。
+        图片创建。
 
         Args:
-            positive_prompt: 创作描述（如 "A cat sitting on a moon"）
-            input_image_b64: 参考图 base64
+            positive_prompt: 创作描述
+            input_image_b64: 参考图 base64（V1 必填，V2 忽略）
             negative_prompt: 反向 prompt
             seed: 随机种子
-            steps: 采样步数（默认用工作流的 4 步）
-            denoise: 去噪强度（默认用工作流的 1.0）
+            steps: 采样步数
+            denoise: 去噪强度
             output_name: 输出文件名
+            workflow_version: "v2"（纯文生图，默认）| "v1"（参考图+创意 prompt）
         """
+        mode = "create-v1" if workflow_version == "v1" else "create"
         return self._run(
-            mode="create",
+            mode=mode,
             positive_prompt=positive_prompt,
             input_image_b64=input_image_b64,
             negative_prompt=negative_prompt,

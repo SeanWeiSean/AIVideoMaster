@@ -20,9 +20,12 @@ import io
 import json
 import os
 import re
+import struct
 import sys
 import threading
 import time
+import zlib
+from base64 import b64encode as _b64encode
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -36,10 +39,28 @@ from config import PipelineConfig, LLMConfig, VideoConfig, ImageGenConfig
 from agents.discussion import DiscussionOrchestrator, DiscussionResult
 from agents.novel_discussion import NovelDiscussionOrchestrator, NovelPipelineResult
 from agents.prompt_optimizer import PromptOptimizerAgent
+from agents.image_creator import ImageArchitect, ImageDescriptor
 from video.comfyui_image import ComfyUIImageClient, ImageJob
 from video.i2v_generator import I2VGenerator, I2VJob
 from video.ltx_i2v_generator import LtxI2VGenerator, LtxI2VJob
+from video.keyframe_i2v_generator import KeyframeI2VGenerator, KeyframeI2VJob
 from templates import TemplateStore
+
+
+# ── 空白图像生成（文生图模式，不需要用户上传图片）─────────────────
+
+def _make_blank_png_b64(width: int = 512, height: int = 512) -> str:
+    """用标准库生成白色 PNG（RGB）并返回 base64。"""
+    def _chunk(tag: bytes, data: bytes) -> bytes:
+        c = tag + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xFFFFFFFF)
+
+    sig   = b'\x89PNG\r\n\x1a\n'
+    ihdr  = _chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+    raw   = b''.join(b'\x00' + b'\xff\xff\xff' * width for _ in range(height))
+    idat  = _chunk(b'IDAT', zlib.compress(raw, 1))
+    iend  = _chunk(b'IEND', b'')
+    return _b64encode(sig + ihdr + idat + iend).decode()
 
 
 # ── 持久化 Job 存储 ──────────────────────────────────────────
@@ -578,7 +599,8 @@ def _run_novel_pipeline(job_id: str, novel_text: str, discuss_only: bool) -> Non
 def _run_image_task(job_id: str, mode: str, positive_prompt: str,
                     negative_prompt: str, input_image_b64: str,
                     seed: int | None, steps: int | None,
-                    denoise: float | None) -> None:
+                    denoise: float | None,
+                    workflow_version: str = "v2") -> None:
     """在后台线程运行图片创建/编辑任务"""
     capture = LogCapture(job_id, sys.stdout)
     old_stdout = sys.stdout
@@ -605,6 +627,7 @@ def _run_image_task(job_id: str, mode: str, positive_prompt: str,
                 negative_prompt=negative_prompt,
                 seed=seed, steps=steps, denoise=denoise,
                 output_name=f"create_{job_id}.png",
+                workflow_version=workflow_version,
             )
         else:
             result = client.image_edit(
@@ -633,6 +656,232 @@ def _run_image_task(job_id: str, mode: str, positive_prompt: str,
 
     except Exception as e:
         jobs.set_error(job_id, str(e))
+    finally:
+        sys.stdout = old_stdout
+
+
+# ── 双智能体图片创作线程 ─────────────────────────────────────
+
+def _run_image_agent_task(
+    job_id: str,
+    user_intent: str,
+    input_image_b64: str,
+    count: int,
+    steps: int | None,
+    denoise: float | None,
+    seed: int | None,
+    use_agent: bool = True,
+    workflow_version: str = "v2",
+) -> None:
+    """在后台线程运行图片创作流水线。use_agent=True 时启用建筑师+描述师润色；False 时直接提交用户输入。"""
+    capture = LogCapture(job_id, sys.stdout)
+    old_stdout = sys.stdout
+    sys.stdout = capture
+
+    try:
+        jobs.set_status(job_id, "running")
+        llm_cfg = LLMConfig(
+            api_key=_current_config.get("llm_api_key", "no-key"),
+            base_url=_current_config.get("llm_base_url", "http://localhost:23333/api/openai/v1"),
+            model=_current_config.get("llm_model", "claude-opus-4.6"),
+        )
+        comfyui_url = _current_config.get("comfyui_url", "http://localhost:8188")
+        output_dir = _current_config.get("output_dir", "./output")
+
+        client = ComfyUIImageClient(comfyui_url, output_dir)
+        if not client.check_connection():
+            raise ConnectionError(f"无法连接 ComfyUI: {comfyui_url}")
+
+        # V1模式需要参考图；无图时自动使用白色画布
+        if not input_image_b64 and workflow_version == "v1":
+            input_image_b64 = _make_blank_png_b64()
+            print("[创作] V1 模式：使用空白画布作为基础")
+
+        architect = ImageArchitect(llm_cfg) if use_agent else None
+        descriptor = ImageDescriptor(llm_cfg) if use_agent else None
+
+        slots: list[dict] = []
+
+        for i in range(count):
+            slot: dict = {
+                "index": i,
+                "user_intent": user_intent,
+                "blueprint": "",
+                "prompt": "",
+                "file_path": "",
+                "status": "pending",
+                "error": "",
+            }
+            slots.append(slot)
+
+            print(f"\n{'='*50}")
+            if use_agent:
+                print(f"[创作 {i+1}/{count}] 建筑师开始扩充蓝图...")
+            else:
+                print(f"[创作 {i+1}/{count}] 直接模式，直接提交 Prompt...")
+            print(f"{'='*50}")
+
+            try:
+                if use_agent:
+                    # 1. 建筑师扩充
+                    blueprint = architect.expand(user_intent)
+                    slot["blueprint"] = blueprint
+                    print(f"[建筑师] 蓝图生成完毕（{len(blueprint)} 字）")
+                    print(f"\n--- 蓝图预览 ---\n{blueprint[:600]}{'...' if len(blueprint)>600 else ''}\n")
+
+                    # 实时通知前端（把蓝图 + 阶段更新写入 result 供轮询）
+                    jobs.set_result(job_id, {
+                        "mode": "create-agent",
+                        "status": "running",
+                        "slots": [dict(s) for s in slots],
+                    })
+
+                    # 2. 描述师生成 Prompt
+                    print(f"[创作 {i+1}/{count}] 描述师生成 Prompt...")
+                    prompt = descriptor.generate_prompt(blueprint)
+                    slot["prompt"] = prompt
+                    print(f"[描述师] Prompt（{len(prompt)} 字）：\n{prompt}\n")
+
+                    # 再次通知前端（prompt 已生成）
+                    jobs.set_result(job_id, {
+                        "mode": "create-agent",
+                        "status": "running",
+                        "slots": [dict(s) for s in slots],
+                    })
+                else:
+                    # 直接模式：跳过智能体，直接用用户输入作为 Prompt
+                    slot["blueprint"] = ""
+                    slot["prompt"] = user_intent
+                    print(f"[直接模式] 跳过智能体，使用原始输入作为 Prompt")
+                    jobs.set_result(job_id, {
+                        "mode": "create-agent",
+                        "status": "running",
+                        "slots": [dict(s) for s in slots],
+                    })
+
+                # 3. 提交 ComfyUI 生图
+                print(f"[创作 {i+1}/{count}] 提交 ComfyUI 生图中...")
+                slot["status"] = "generating"
+                jobs.set_result(job_id, {
+                    "mode": "create-agent",
+                    "status": "running",
+                    "slots": [dict(s) for s in slots],
+                })
+
+                slot_seed = (seed + i) if seed is not None else None
+                output_name = f"agent_create_{job_id}_{i:02d}.png"
+                result = client.image_create(
+                    positive_prompt=slot["prompt"],
+                    input_image_b64=input_image_b64,
+                    negative_prompt="",
+                    seed=slot_seed,
+                    steps=steps,
+                    denoise=denoise,
+                    output_name=output_name,
+                    workflow_version=workflow_version,
+                )
+
+                if result.status == "success":
+                    slot["file_path"] = result.file_path
+                    slot["status"] = "success"
+                    print(f"[OK] 第 {i+1} 张图片已保存: {result.file_path}")
+                else:
+                    slot["status"] = "failed"
+                    slot["error"] = result.error
+                    print(f"[FAIL] 第 {i+1} 张图片生成失败: {result.error}")
+
+            except Exception as e:
+                slot["status"] = "failed"
+                slot["error"] = str(e)
+                print(f"[ERROR] 第 {i+1} 槽出错: {e}")
+
+            # 每个 slot 完成后更新结果
+            jobs.set_result(job_id, {
+                "mode": "create-agent",
+                "status": "running",
+                "slots": [dict(s) for s in slots],
+            })
+
+        # 全部完成
+        all_ok = all(s["status"] == "success" for s in slots)
+        final_result = {
+            "mode": "create-agent",
+            "status": "success" if all_ok else "partial",
+            "slots": slots,
+        }
+        jobs.set_result(job_id, final_result)
+        jobs.set_status(job_id, "done")
+        print(f"\n[完成] 全部 {count} 张图片创作结束。")
+
+    except Exception as e:
+        jobs.set_error(job_id, str(e))
+    finally:
+        sys.stdout = old_stdout
+
+
+def _run_image_regen_task(
+    job_id: str,
+    slot_index: int,
+    prompt: str,
+    input_image_b64: str,
+    steps: int | None,
+    denoise: float | None,
+    seed: int | None,
+    workflow_version: str = "v2",
+) -> None:
+    """重新生成某一个 slot 的图片（保留 prompt，只换 seed 重新跑 ComfyUI）"""
+    capture = LogCapture(job_id, sys.stdout)
+    old_stdout = sys.stdout
+    sys.stdout = capture
+
+    try:
+        comfyui_url = _current_config.get("comfyui_url", "http://localhost:8188")
+        output_dir = _current_config.get("output_dir", "./output")
+        client = ComfyUIImageClient(comfyui_url, output_dir)
+
+        if not client.check_connection():
+            raise ConnectionError(f"无法连接 ComfyUI: {comfyui_url}")
+
+        # V1模式需要参考图
+        if not input_image_b64 and workflow_version == "v1":
+            input_image_b64 = _make_blank_png_b64()
+
+        print(f"[Regen] 重新生成 slot {slot_index}，prompt：{prompt[:80]}")
+
+        ts = int(time.time())
+        output_name = f"agent_regen_{job_id}_{slot_index:02d}_{ts}.png"
+        result = client.image_create(
+            positive_prompt=prompt,
+            input_image_b64=input_image_b64,
+            negative_prompt="",
+            seed=seed,
+            steps=steps,
+            denoise=denoise,
+            output_name=output_name,
+            workflow_version=workflow_version,
+        )
+
+        # 更新对应 slot
+        meta = jobs.get(job_id)
+        if meta:
+            res = meta.get("result", {})
+            slots: list = res.get("slots", [])
+            for s in slots:
+                if s.get("index") == slot_index:
+                    if result.status == "success":
+                        s["file_path"] = result.file_path
+                        s["status"] = "success"
+                        s["error"] = ""
+                        print(f"[OK] Regen 完成: {result.file_path}")
+                    else:
+                        s["status"] = "failed"
+                        s["error"] = result.error
+                        print(f"[FAIL] Regen 失败: {result.error}")
+                    break
+            jobs.set_result(job_id, res)
+
+    except Exception as e:
+        print(f"[ERROR] Regen 出错: {e}")
     finally:
         sys.stdout = old_stdout
 
@@ -760,6 +1009,76 @@ def _run_ltx_i2v_task(job_id: str, positive_prompt: str, negative_prompt: str,
             print(f"[OK] LTX I2V 视频完成: {result.file_path}")
         else:
             print(f"[FAIL] LTX I2V 视频失败: {result.error}")
+
+    except Exception as e:
+        jobs.set_error(job_id, str(e))
+    finally:
+        sys.stdout = old_stdout
+
+
+# ── 6关键帧 I2V 视频生成线程 ─────────────────────────────────
+
+def _run_keyframe_i2v_task(
+    job_id: str,
+    images_b64: list[str],
+    prompts: list[str],
+    negative_prompt: str,
+    width: int,
+    height: int,
+    length: int,
+    seed: int | None,
+    fps: int,
+) -> None:
+    """在后台线程运行 6关键帧 I2V 视频生成任务"""
+    capture = LogCapture(job_id, sys.stdout)
+    old_stdout = sys.stdout
+    sys.stdout = capture
+
+    try:
+        jobs.set_status(job_id, "running")
+        comfyui_url = _current_config.get("comfyui_url", "http://localhost:8188")
+        output_dir = _current_config.get("output_dir", "./output")
+        generator = KeyframeI2VGenerator(comfyui_url, output_dir)
+
+        if not generator.check_connection():
+            raise ConnectionError(f"无法连接 ComfyUI: {comfyui_url}")
+
+        print(f"[KF6-I2V] 6关键帧视频生成")
+        print(f"[KF6-I2V] 收到 {len(images_b64)} 张关键帧, {len(prompts)} 段提示词")
+        print(f"[KF6-I2V] 参数: {width}x{height}, 每段{length}帧, fps={fps}")
+
+        result = generator.generate(
+            images_b64=images_b64,
+            prompts=prompts,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            length=length,
+            seed=seed,
+            fps=fps,
+            output_name=f"kf6_i2v_{job_id}.mp4",
+        )
+
+        result_data = {
+            "mode": "keyframe-i2v",
+            "status": result.status,
+            "file_path": result.file_path,
+            "error": result.error,
+            "prompts": prompts,
+            "negative_prompt": negative_prompt,
+            "width": width,
+            "height": height,
+            "length": length,
+            "fps": fps,
+            "frame_count": len(images_b64),
+        }
+        jobs.set_result(job_id, result_data)
+        jobs.set_status(job_id, "done" if result.status == "success" else "error")
+
+        if result.status == "success":
+            print(f"[OK] 6关键帧视频完成: {result.file_path}")
+        else:
+            print(f"[FAIL] 6关键帧视频失败: {result.error}")
 
     except Exception as e:
         jobs.set_error(job_id, str(e))
@@ -905,6 +1224,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 "logs": logs,
                 "total": len(job["logs"]),
                 "status": job["status"],
+                "result": job.get("result"),   # 实时结果，供智能体进度轮询使用
             })
 
         elif path == "/api/jobs":
@@ -1040,10 +1360,13 @@ class APIHandler(BaseHTTPRequestHandler):
             mode = "create" if path.endswith("/create") else "edit"
             positive_prompt = body.get("positive_prompt", "")
             input_image = body.get("input_image", "")
+            workflow_version = body.get("workflow_version", "v2")
             if not positive_prompt:
                 self._json_response({"error": "positive_prompt is required"}, 400)
                 return
-            if not input_image:
+            # V2 create 是纯文生图，无需输入图；V1 create 和 edit 需要输入图
+            needs_image = (mode == "edit") or (mode == "create" and workflow_version == "v1")
+            if needs_image and not input_image:
                 self._json_response({"error": "input_image (base64) is required"}, 400)
                 return
             negative_prompt = body.get("negative_prompt", "")
@@ -1062,11 +1385,79 @@ class APIHandler(BaseHTTPRequestHandler):
             t = threading.Thread(
                 target=_run_image_task,
                 args=(job_id, mode, positive_prompt, negative_prompt,
-                      input_image, seed, steps, denoise),
+                      input_image, seed, steps, denoise, workflow_version),
                 daemon=True,
             )
             t.start()
             self._json_response({"job_id": job_id, "session_id": job_id})
+
+        elif path == "/api/image/create-with-agent":
+            body = self._read_body()
+            user_intent = body.get("user_intent", "").strip()
+            input_image = body.get("input_image", "")   # 可选，空则自动使用白色画布
+            use_agent = bool(body.get("use_agent", True))
+            workflow_version = body.get("workflow_version", "v2")
+            if not user_intent:
+                self._json_response({"error": "user_intent is required"}, 400)
+                return
+            count = max(1, min(8, int(body.get("count", 1))))
+            seed = body.get("seed")
+            if seed is not None:
+                seed = int(seed)
+            steps = body.get("steps")
+            if steps is not None:
+                steps = int(steps)
+            denoise = body.get("denoise")
+            if denoise is not None:
+                denoise = float(denoise)
+
+            mode_label = "AI创作(智能体)" if use_agent else "AI创作(直接)"
+            job_id = jobs.create(mode="create-agent", title=f"{mode_label}: {user_intent[:50]}")
+            t = threading.Thread(
+                target=_run_image_agent_task,
+                args=(job_id, user_intent, input_image, count, steps, denoise, seed, use_agent, workflow_version),
+                daemon=True,
+            )
+            t.start()
+            self._json_response({"job_id": job_id, "session_id": job_id})
+
+        elif path == "/api/image/regenerate":
+            body = self._read_body()
+            job_id = body.get("job_id", "")
+            slot_index = int(body.get("slot_index", 0))
+            prompt = body.get("prompt", "")
+            input_image = body.get("input_image", "")   # 可选
+            workflow_version = body.get("workflow_version", "v2")
+            if not job_id or not prompt:
+                self._json_response({"error": "job_id, prompt required"}, 400)
+                return
+            seed = body.get("seed")
+            if seed is not None:
+                seed = int(seed)
+            steps = body.get("steps")
+            if steps is not None:
+                steps = int(steps)
+            denoise = body.get("denoise")
+            if denoise is not None:
+                denoise = float(denoise)
+
+            # 先把对应 slot 标记为 regenerating
+            meta = jobs.get(job_id)
+            if meta:
+                res = meta.get("result", {})
+                for s in res.get("slots", []):
+                    if s.get("index") == slot_index:
+                        s["status"] = "generating"
+                        break
+                jobs.set_result(job_id, res)
+
+            t = threading.Thread(
+                target=_run_image_regen_task,
+                args=(job_id, slot_index, prompt, input_image, steps, denoise, seed, workflow_version),
+                daemon=True,
+            )
+            t.start()
+            self._json_response({"status": "ok", "job_id": job_id})
 
         elif path == "/api/video/i2v":
             body = self._read_body()
@@ -1124,6 +1515,39 @@ class APIHandler(BaseHTTPRequestHandler):
                 args=(job_id, positive_prompt, negative_prompt, input_image,
                       width, height, length, seed,
                       steps, cfg_pass1, cfg_pass2),
+                daemon=True,
+            )
+            t.start()
+            self._json_response({"job_id": job_id, "session_id": job_id})
+
+        elif path == "/api/video/keyframe-i2v":
+            body = self._read_body()
+            # images: list of 6 base64 strings
+            images_b64 = body.get("images", [])
+            if len(images_b64) != 6:
+                self._json_response(
+                    {"error": f"images must contain exactly 6 base64 frames, got {len(images_b64)}"}, 400
+                )
+                return
+            # prompts: list of up to 5 strings (one per segment)
+            prompts = body.get("prompts", [])
+            if not isinstance(prompts, list):
+                prompts = [prompts] if prompts else []
+            negative_prompt = body.get("negative_prompt", "")
+            width = int(body.get("width", 720))
+            height = int(body.get("height", 720))
+            length = int(body.get("length", 25))
+            fps = int(body.get("fps", 24))
+            seed = body.get("seed")
+            if seed is not None:
+                seed = int(seed)
+
+            title_preview = (prompts[0][:50] if prompts else "6关键帧视频")
+            job_id = jobs.create(mode="keyframe-i2v", title=f"KF6-I2V: {title_preview}")
+            t = threading.Thread(
+                target=_run_keyframe_i2v_task,
+                args=(job_id, images_b64, prompts, negative_prompt,
+                      width, height, length, seed, fps),
                 daemon=True,
             )
             t.start()

@@ -55,9 +55,21 @@ function waitForServer(port, timeout = 30000) {
   });
 }
 
+function getPythonExecutable() {
+  const fs = require('fs');
+  // Prefer virtual environment python if it exists
+  const venvPython = path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe');
+  if (fs.existsSync(venvPython)) {
+    console.log(`Using venv Python: ${venvPython}`);
+    return venvPython;
+  }
+  return 'python';
+}
+
 function startPythonServer() {
   console.log('Starting Python API server...');
-  serverProcess = spawn('python', ['server.py', '--port', String(SERVER_PORT)], {
+  const pythonExe = getPythonExecutable();
+  serverProcess = spawn(pythonExe, ['server.py', '--port', String(SERVER_PORT)], {
     cwd: PROJECT_ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },

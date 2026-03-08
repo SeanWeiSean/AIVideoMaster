@@ -65,14 +65,24 @@ class GeneratedClip:
 class ComfyUIClient:
     """ComfyUI HTTP API 封装"""
 
-    def __init__(self, base_url: str, timeout: int = 30) -> None:
+    def __init__(self, base_url: str, timeout: int = 30, api_key: str = "") -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.api_key = api_key
+
+    def _auth_headers(self) -> dict:
+        """返回鉴权请求头（支持 X-API-Key 和 Authorization: Bearer 两种方式）"""
+        if not self.api_key:
+            return {}
+        return {
+            "X-API-Key": self.api_key,
+            "Authorization": f"Bearer {self.api_key}",
+        }
 
     def _request(self, path: str, method: str = "GET", payload: dict | None = None) -> dict:
         url = f"{self.base_url}{path}"
         data = None
-        headers = {}
+        headers = self._auth_headers()
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -106,7 +116,7 @@ class ComfyUIClient:
             "type": output_type,
         })
         url = f"{self.base_url}/view?{params}"
-        req = request.Request(url)
+        req = request.Request(url, headers=self._auth_headers())
         with request.urlopen(req, timeout=120) as resp:
             return resp.read()
 
@@ -137,7 +147,7 @@ class ComfyUIClient:
         body = b"".join(body_parts)
 
         url = f"{self.base_url}/upload/image"
-        req = request.Request(url, data=body, method="POST")
+        req = request.Request(url, data=body, headers=self._auth_headers(), method="POST")
         req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
         with request.urlopen(req, timeout=self.timeout) as resp:
             result = json.loads(resp.read().decode("utf-8"))
@@ -159,7 +169,7 @@ class VideoGenerator:
         self.config = config
         self.output_dir = Path(config.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.client = ComfyUIClient(config.comfyui_url)
+        self.client = ComfyUIClient(config.comfyui_url, api_key=config.comfyui_api_key)
         self._profile = self._resolve_profile()
         self._base_workflow = self._load_workflow()
 
